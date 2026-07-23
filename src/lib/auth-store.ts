@@ -1,44 +1,65 @@
-// Persist the N3 JWT in localStorage under a single stable key. Both Path A
-// (production launch from My Apps with ?token=…) and Path B (dev-only connect)
-// write to this key so the session survives refreshes and Vite restarts.
+// Persist the N3 JWT in localStorage under the key mandated by the N3 dev
+// brief: `qne_access_token`. Path A (production launch from N3 My Apps with
+// `?token=…`) and Path B (dev-only connect) both write here so the session
+// survives refreshes and Vite restarts. All reads/writes are guarded so this
+// module is safe to import in SSR chains.
 
-const KEY = "n3.accessToken";
+const KEY = "qne_access_token";
+const EVENT = "qne-auth-change";
 
-export function getToken(): string | null {
+function safeStorage(): Storage | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage.getItem(KEY);
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function getToken(): string | null {
+  const s = safeStorage();
+  if (!s) return null;
+  try {
+    return s.getItem(KEY);
   } catch {
     return null;
   }
 }
 
 export function setToken(token: string): void {
-  if (typeof window === "undefined") return;
+  const s = safeStorage();
+  if (!s) return;
   try {
-    window.localStorage.setItem(KEY, token);
-    window.dispatchEvent(new Event("n3-auth-change"));
+    s.setItem(KEY, token);
+    window.dispatchEvent(new Event(EVENT));
   } catch {
     // ignore
   }
 }
 
 export function clearToken(): void {
-  if (typeof window === "undefined") return;
+  const s = safeStorage();
+  if (!s) return;
   try {
-    window.localStorage.removeItem(KEY);
-    window.dispatchEvent(new Event("n3-auth-change"));
+    s.removeItem(KEY);
+    window.dispatchEvent(new Event(EVENT));
   } catch {
     // ignore
   }
 }
 
-/** Decode a JWT payload without verifying the signature. Returns null on bad input. */
+export const AUTH_EVENT = EVENT;
+
+/** Decode a JWT payload without verifying the signature. */
 export function decodeJwt(token: string): Record<string, unknown> | null {
   try {
     const [, payload] = token.split(".");
     if (!payload) return null;
-    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
+    const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const json =
+      typeof atob === "function"
+        ? atob(b64)
+        : Buffer.from(b64, "base64").toString("utf8");
     return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;
