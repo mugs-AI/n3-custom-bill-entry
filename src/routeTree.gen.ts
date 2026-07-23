@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as DevLoginRouteImport } from './routes/dev-login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiAuthDevConnectRouteImport } from './routes/api/auth/dev-connect'
 
+const DevLoginRoute = DevLoginRouteImport.update({
+  id: '/dev-login',
+  path: '/dev-login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -31,36 +37,47 @@ const ApiAuthDevConnectRoute = ApiAuthDevConnectRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/dev-login': typeof DevLoginRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/dev-login': typeof DevLoginRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/dev-login': typeof DevLoginRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/auth/dev-connect' | '/api/proxy/$'
+  fullPaths: '/' | '/dev-login' | '/api/auth/dev-connect' | '/api/proxy/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/auth/dev-connect' | '/api/proxy/$'
-  id: '__root__' | '/' | '/api/auth/dev-connect' | '/api/proxy/$'
+  to: '/' | '/dev-login' | '/api/auth/dev-connect' | '/api/proxy/$'
+  id: '__root__' | '/' | '/dev-login' | '/api/auth/dev-connect' | '/api/proxy/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DevLoginRoute: typeof DevLoginRoute
   ApiAuthDevConnectRoute: typeof ApiAuthDevConnectRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/dev-login': {
+      id: '/dev-login'
+      path: '/dev-login'
+      fullPath: '/dev-login'
+      preLoaderRoute: typeof DevLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -87,6 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DevLoginRoute: DevLoginRoute,
   ApiAuthDevConnectRoute: ApiAuthDevConnectRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
 }
