@@ -1,4 +1,4 @@
-import { getToken } from "./auth-store";
+import { clearToken, getToken } from "./auth-store";
 
 // Client-side helper for calling N3 Open API through our same-origin backend
 // proxy. Every response is unwrapped from the N3 envelope
@@ -82,6 +82,17 @@ export async function n3Call<T = unknown>(
     parsed = text ? JSON.parse(text) : null;
   } catch {
     parsed = text;
+  }
+
+  if (res.status === 401) {
+    // Invalid or expired token — drop the session so the UI can prompt again.
+    clearToken();
+    const env = parsed as N3Envelope<T> | null;
+    throw new N3Error(env?.message || "Session expired. Please sign in again.", {
+      code: env?.code ?? "UNAUTHORIZED",
+      status: 401,
+      raw: parsed,
+    });
   }
 
   if (!res.ok) {
