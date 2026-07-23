@@ -20,7 +20,7 @@ export const Route = createFileRoute("/")({
       {
         property: "og:description",
         content:
-          "Keyboard-friendly alternative to the standard N3 Purchase Invoice screen.",
+          "Keyboard-first Purchase Invoice entry for N3 AI Cloud Accounting. Live master data, single-screen entry.",
       },
     ],
   }),

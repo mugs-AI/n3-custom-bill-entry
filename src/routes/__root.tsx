@@ -80,6 +80,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "author", content: "N3 Custom Bill Entry" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
+      { title: "New Bill Entry · Custom Bill Entry" },
+      { property: "og:title", content: "New Bill Entry · Custom Bill Entry" },
+      { name: "twitter:title", content: "New Bill Entry · Custom Bill Entry" },
+      { name: "description", content: "Keyboard-first Purchase Invoice entry for N3 AI Cloud Accounting. Live master data, single-screen entry." },
+      { property: "og:description", content: "Keyboard-first Purchase Invoice entry for N3 AI Cloud Accounting. Live master data, single-screen entry." },
+      { name: "twitter:description", content: "Keyboard-first Purchase Invoice entry for N3 AI Cloud Accounting. Live master data, single-screen entry." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/3a0df8de-7ea5-454b-a171-d9ffd8ad1331/id-preview-7b8624da--5873cd07-84e9-4fc3-868e-fe0c54ec92fc.lovable.app-1784822476361.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/3a0df8de-7ea5-454b-a171-d9ffd8ad1331/id-preview-7b8624da--5873cd07-84e9-4fc3-868e-fe0c54ec92fc.lovable.app-1784822476361.png" },
     ],
     links: [
       {
