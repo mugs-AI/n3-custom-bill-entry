@@ -3,9 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { SearchableSelect, type ComboOption } from "@/components/SearchableSelect";
+import { MyDateInput } from "@/components/MyDateInput";
 import { setToken } from "@/lib/auth-store";
-import { useAuthToken } from "@/hooks/use-auth";
-import { n3ListAll, N3Error } from "@/lib/n3-client";
+import { useAuthToken, useHydrated } from "@/hooks/use-auth";
+import { n3Call, n3ListAll, N3Error } from "@/lib/n3-client";
+import { todayISOInKL } from "@/lib/date-my";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -27,23 +29,46 @@ export const Route = createFileRoute("/")({
   component: NewBillEntry,
 });
 
-// -------- Types loosely modelled on N3 DTOs (we only depend on a few fields) --------
+// -------- Types modelled on real N3 DTOs (verified against swagger). --------
+// SupplierListDto: id, code, name, address1..4, contactPerson, email, phoneNo1,
+//   phoneNo2, termCode, ...
+// SupplierDto (detail /api/Suppliers/{id}): id, code, name, address1..4,
+//   contactPerson, email, eInvoiceEmail, emailList[], phoneNo1, termId,
+//   term: { id, code, description }, ...
+// PurchaserDto: id, code, name, isActive, isDefault, ...
+// TermLookupDto (/api/Terms/Query): id, code, description, type, value.
 
-interface Supplier {
-  id?: string;
+interface SupplierList {
+  id: number;
   code?: string;
-  companyName?: string;
+  name?: string;
+  email?: string;
+  emailList?: string[];
+  phoneNo1?: string;
+  phoneNo2?: string;
+  contactPerson?: string;
   address1?: string;
   address2?: string;
-  contact?: string;
-  phone1?: string;
-  emailAddress?: string;
-  creditTerm?: { code?: string } | null;
-  creditTermId?: string;
+  address3?: string;
+  address4?: string;
+  termCode?: string;
+}
+
+interface SupplierDetail extends SupplierList {
+  eInvoiceEmail?: string;
+  termId?: number;
+  term?: { id?: number; code?: string; description?: string } | null;
 }
 
 interface Purchaser {
-  id?: string;
+  id: number;
+  code?: string;
+  name?: string;
+  isActive?: boolean;
+}
+
+interface Term {
+  id: number;
   code?: string;
   description?: string;
 }
@@ -76,33 +101,59 @@ const emptyLine = (): DetailLine => ({
   refNo: "",
 });
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
-
 function NewBillEntry() {
+  // Root crash root cause: `?token=…` from N3 My Apps is present during SSR
+  // too, but SSR cannot read/write localStorage. If we render BillForm on the
+  // server (no token → NoAuthPanel) and then swap to BillForm on the client
+  // after capturing the token, React sees a fully different tree at hydration
+  // → hydration mismatch → error boundary → "This page didn't load".
+  //
+  // Fix: render a neutral shell on the server and defer the auth-dependent UI
+  // until after the first client render. Token capture from the URL runs in
+  // that same effect, BEFORE any protected N3 request can run.
+  const hydrated = useHydrated();
   const token = useAuthToken();
-  const [captured, setCaptured] = useState(false);
+  const [capturePhase, setCapturePhase] = useState<"pending" | "done">("pending");
 
-  // Path A: capture ?token= from N3 My Apps launch.
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    const t = url.searchParams.get("token");
-    if (t) {
-      setToken(t);
-      url.searchParams.delete("token");
-      window.history.replaceState({}, "", url.toString());
-      setCaptured(true);
+    if (typeof window === "undefined") {
+      setCapturePhase("done");
+      return;
     }
+    try {
+      const url = new URL(window.location.href);
+      const t = url.searchParams.get("token");
+      if (t) {
+        // Persist BEFORE cleaning the URL so a race that reads the URL later
+        // still finds the token in storage.
+        setToken(t);
+        url.searchParams.delete("token");
+        window.history.replaceState({}, "", url.toString());
+      }
+    } catch {
+      // Fail-safe: never let URL parsing crash the app shell.
+    }
+    setCapturePhase("done");
   }, []);
 
   return (
     <AppShell>
-      {!token && !captured ? (
+      {!hydrated || capturePhase === "pending" ? (
+        <BootShell />
+      ) : !token ? (
         <NoAuthPanel />
       ) : (
         <BillForm />
       )}
     </AppShell>
+  );
+}
+
+function BootShell() {
+  return (
+    <div className="app-card mx-auto max-w-lg p-6 text-sm text-muted-foreground">
+      Loading N3 session…
+    </div>
   );
 }
 
@@ -113,9 +164,9 @@ function NoAuthPanel() {
     <div className="app-card mx-auto max-w-lg p-6">
       <h1 className="text-lg font-semibold">Not connected to N3</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        This app must be launched from <strong>N3 My Apps</strong> so the JWT is
-        delivered on the URL as <code>?token=…</code>. The token is then stored in
-        your browser and reused across reloads.
+        This app must be launched from <strong>N3 My Apps</strong> so the JWT
+        arrives on the URL as <code>?token=…</code>. It is then stored in your
+        browser and reused across reloads.
       </p>
       {isDev && (
         <p className="mt-3 text-sm text-muted-foreground">
@@ -133,55 +184,112 @@ function NoAuthPanel() {
 // ------------------------------- The form -------------------------------
 
 function BillForm() {
-  const [docDate, setDocDate] = useState(todayISO());
-  const [supplierId, setSupplierId] = useState<string | null>(null);
-  const [purchaserId, setPurchaserId] = useState<string | null>(null);
-  const [description, setDescription] = useState(""); // HQ Sequence
+  const [docDate, setDocDate] = useState(() => todayISOInKL());
+  const [supplierId, setSupplierId] = useState<number | null>(null);
+  const [purchaserId, setPurchaserId] = useState<number | null>(null);
+  const [termId, setTermId] = useState<number | null>(null);
+  const [termTouched, setTermTouched] = useState(false);
+  const [description, setDescription] = useState("");
   const [refNo, setRefNo] = useState("");
   const [supplierInvNo, setSupplierInvNo] = useState("");
   const [lines, setLines] = useState<DetailLine[]>(() => [emptyLine()]);
 
   const suppliersQ = useQuery({
     queryKey: ["n3", "suppliers"],
-    queryFn: () => n3ListAll<Supplier>("api/Suppliers/List", { pageSize: 200 }),
+    queryFn: ({ signal }) =>
+      n3ListAll<SupplierList>("api/Suppliers/List", { pageSize: 500, signal }),
     staleTime: 60_000,
+    retry: (count, err) => (err instanceof N3Error && err.status === 401 ? false : count < 1),
   });
+
   const purchasersQ = useQuery({
     queryKey: ["n3", "purchasers"],
-    queryFn: () => n3ListAll<Purchaser>("api/Purchasers/Query", { pageSize: 200 }),
+    queryFn: ({ signal }) =>
+      n3ListAll<Purchaser>("api/Purchasers/Query", { pageSize: 500, signal }),
     staleTime: 60_000,
+    retry: (count, err) => (err instanceof N3Error && err.status === 401 ? false : count < 1),
   });
+
+  const termsQ = useQuery({
+    queryKey: ["n3", "terms"],
+    queryFn: ({ signal }) =>
+      n3ListAll<Term>("api/Terms/Query", { pageSize: 500, signal }),
+    staleTime: 5 * 60_000,
+    retry: (count, err) => (err instanceof N3Error && err.status === 401 ? false : count < 1),
+  });
+
+  // Hydrate the selected Supplier's full record. The list DTO already includes
+  // address/contact/email/phone, but the fully-typed term relation only lives
+  // on SupplierDto — so we always fetch when a selection exists.
+  const supplierDetailQ = useQuery({
+    queryKey: ["n3", "supplier", supplierId],
+    queryFn: ({ signal }) =>
+      n3Call<SupplierDetail>(`api/Suppliers/${supplierId}`, { signal }),
+    enabled: supplierId != null,
+    staleTime: 30_000,
+    retry: (count, err) => (err instanceof N3Error && err.status === 401 ? false : count < 1),
+  });
+
+  // Default Term from the supplier profile (only until the user picks one).
+  useEffect(() => {
+    if (termTouched) return;
+    const detail = supplierDetailQ.data;
+    if (!detail) return;
+    const next = detail.termId ?? detail.term?.id ?? null;
+    setTermId(next);
+  }, [supplierDetailQ.data, termTouched]);
+
+  // Clearing the Supplier resets every derived field consistently.
+  useEffect(() => {
+    if (supplierId == null) {
+      setTermId(null);
+      setTermTouched(false);
+    }
+  }, [supplierId]);
 
   const supplierOptions: ComboOption[] = useMemo(
     () =>
       (suppliersQ.data ?? []).map((s) => ({
-        value: s.id ?? s.code ?? "",
-        label: `${s.code ?? ""} — ${s.companyName ?? ""}`,
-        hint: s.emailAddress ?? undefined,
+        value: String(s.id),
+        label: `${s.code ?? ""} — ${s.name ?? ""}`.trim(),
+        hint: s.termCode ?? undefined,
       })),
     [suppliersQ.data],
   );
 
   const purchaserOptions: ComboOption[] = useMemo(
     () =>
-      (purchasersQ.data ?? []).map((p) => ({
-        value: p.id ?? p.code ?? "",
-        label: `${p.code ?? ""} — ${p.description ?? ""}`,
-      })),
+      (purchasersQ.data ?? [])
+        .filter((p) => p.isActive !== false)
+        .map((p) => ({
+          value: String(p.id),
+          label: `${p.code ?? ""} — ${p.name ?? ""}`.trim(),
+        })),
     [purchasersQ.data],
   );
 
-  const selectedSupplier = useMemo(
-    () => (suppliersQ.data ?? []).find((s) => (s.id ?? s.code) === supplierId) ?? null,
-    [suppliersQ.data, supplierId],
+  const termOptions: ComboOption[] = useMemo(
+    () =>
+      (termsQ.data ?? []).map((t) => ({
+        value: String(t.id),
+        label: `${t.code ?? ""} — ${t.description ?? ""}`.trim(),
+      })),
+    [termsQ.data],
   );
 
-  const anyError =
-    suppliersQ.error instanceof N3Error
-      ? suppliersQ.error.message
-      : purchasersQ.error instanceof N3Error
-        ? purchasersQ.error.message
-        : null;
+  const detail = supplierDetailQ.data ?? null;
+  const addressLines = [
+    detail?.address1,
+    detail?.address2,
+    detail?.address3,
+    detail?.address4,
+  ]
+    .map((s) => (s ?? "").trim())
+    .filter((s) => s.length > 0);
+
+  const email = pickEmail(detail);
+  const phone = detail?.phoneNo1 ?? "";
+  const contact = detail?.contactPerson ?? "";
 
   const totalNet = useMemo(
     () =>
@@ -202,12 +310,10 @@ function BillForm() {
     <form
       className="space-y-5"
       onSubmit={(e) => {
+        // Save is intentionally disabled until Phase 2 wires the real POST.
         e.preventDefault();
-        // Phase 2: implement save flow (duplicate check + POST /api/PurchaseInvoices/Create)
-        alert("Save is wired in Phase 2. Duplicate check + N3 POST comes next.");
       }}
       onKeyDown={(e) => {
-        // Guard: Enter inside grid or dropdowns must NEVER submit the form.
         if (e.key === "Enter") {
           const target = e.target as HTMLElement;
           if (target.tagName !== "TEXTAREA") e.preventDefault();
@@ -225,17 +331,21 @@ function BillForm() {
           <button type="button" className="app-btn" onClick={() => window.location.reload()}>
             Reset
           </button>
-          <button type="submit" className="app-btn app-btn-primary">
-            Save to N3
+          <button
+            type="button"
+            disabled
+            title="Purchase Invoice POST arrives in Phase 2"
+            className="app-btn app-btn-primary cursor-not-allowed opacity-60"
+          >
+            Save to N3 · Available after Phase 2
           </button>
         </div>
       </div>
 
-      {anyError && (
-        <div className="rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive">
-          Failed to load master data: {anyError}
-        </div>
-      )}
+      <ErrorBanner label="Suppliers" query={suppliersQ} />
+      <ErrorBanner label="Purchasers" query={purchasersQ} />
+      <ErrorBanner label="Terms" query={termsQ} />
+      <ErrorBanner label="Supplier details" query={supplierDetailQ} />
 
       {/* Header card */}
       <div className="app-card p-5">
@@ -249,20 +359,23 @@ function BillForm() {
             />
           </div>
           <div>
-            <label className="app-label">Document Date</label>
-            <input
-              type="date"
-              className="app-input"
+            <label className="app-label" htmlFor="doc-date">
+              Document Date
+            </label>
+            <MyDateInput
+              id="doc-date"
               value={docDate}
-              onChange={(e) => setDocDate(e.target.value)}
+              onChange={setDocDate}
+              ariaLabel="Document Date"
+              required
             />
           </div>
           <div>
             <label className="app-label">Supplier</label>
             <SearchableSelect
               options={supplierOptions}
-              value={supplierId}
-              onChange={(o) => setSupplierId(o?.value ?? null)}
+              value={supplierId != null ? String(supplierId) : null}
+              onChange={(o) => setSupplierId(o ? Number(o.value) : null)}
               loading={suppliersQ.isLoading}
               placeholder={
                 suppliersQ.isLoading ? "Loading suppliers…" : "Search by code or name"
@@ -276,55 +389,72 @@ function BillForm() {
             <input
               className="app-input"
               readOnly
-              value={selectedSupplier?.companyName ?? ""}
+              value={detail?.name ?? ""}
             />
           </div>
           <div>
             <label className="app-label">Payment Type (Purchaser)</label>
             <SearchableSelect
               options={purchaserOptions}
-              value={purchaserId}
-              onChange={(o) => setPurchaserId(o?.value ?? null)}
+              value={purchaserId != null ? String(purchaserId) : null}
+              onChange={(o) => setPurchaserId(o ? Number(o.value) : null)}
               loading={purchasersQ.isLoading}
-              placeholder="Blank — select if needed"
+              placeholder={
+                purchasersQ.isLoading ? "Loading purchasers…" : "Blank — select if needed"
+              }
               ariaLabel="Purchaser"
             />
           </div>
 
           <div className="md:col-span-2">
             <label className="app-label">Supplier Address</label>
-            <input
-              className="app-input"
-              readOnly
-              value={[selectedSupplier?.address1, selectedSupplier?.address2]
-                .filter(Boolean)
-                .join(", ")}
-            />
+            <div
+              className="app-input min-h-[76px] whitespace-pre-line py-2"
+              role="group"
+              aria-label="Supplier Address"
+            >
+              {supplierDetailQ.isLoading && supplierId != null ? (
+                <span className="text-muted-foreground">Loading…</span>
+              ) : addressLines.length ? (
+                addressLines.join("\n")
+              ) : (
+                ""
+              )}
+            </div>
           </div>
           <div>
             <label className="app-label">Supplier Contact</label>
-            <input className="app-input" readOnly value={selectedSupplier?.contact ?? ""} />
+            <input className="app-input" readOnly value={contact} />
           </div>
 
           <div>
             <label className="app-label">Supplier Phone</label>
-            <input className="app-input" readOnly value={selectedSupplier?.phone1 ?? ""} />
+            <input className="app-input" readOnly value={phone} />
           </div>
           <div>
             <label className="app-label">Supplier Email</label>
-            <input
-              className="app-input"
-              readOnly
-              value={selectedSupplier?.emailAddress ?? ""}
-            />
+            <input className="app-input" readOnly value={email} />
           </div>
           <div>
-            <label className="app-label">Term</label>
-            <input
-              className="app-input"
-              readOnly
-              value={selectedSupplier?.creditTerm?.code ?? ""}
-              placeholder="From supplier"
+            <label className="app-label">
+              Term <span className="text-destructive">*</span>
+            </label>
+            <SearchableSelect
+              options={termOptions}
+              value={termId != null ? String(termId) : null}
+              onChange={(o) => {
+                setTermTouched(true);
+                setTermId(o ? Number(o.value) : null);
+              }}
+              loading={termsQ.isLoading}
+              placeholder={
+                termsQ.isLoading
+                  ? "Loading terms…"
+                  : supplierId
+                    ? "Default from supplier"
+                    : "Select a term"
+              }
+              ariaLabel="Term"
             />
           </div>
 
@@ -354,13 +484,12 @@ function BillForm() {
               className="app-input"
               value={supplierInvNo}
               onChange={(e) => setSupplierInvNo(e.target.value)}
-              placeholder="Duplicate check on save"
+              placeholder="Duplicate check on save (Phase 2)"
             />
           </div>
         </div>
       </div>
 
-      {/* Detail grid */}
       <DetailGrid
         lines={lines}
         onAdd={addLine}
@@ -369,6 +498,52 @@ function BillForm() {
         totalNet={totalNet}
       />
     </form>
+  );
+}
+
+// Email may be a plain string, an object with `value`, or an array of either
+// (varies by e-invoice configuration). Pick the first non-empty string.
+function pickEmail(detail: SupplierDetail | null): string {
+  if (!detail) return "";
+  const candidates: unknown[] = [
+    detail.email,
+    detail.eInvoiceEmail,
+    ...(Array.isArray(detail.emailList) ? detail.emailList : []),
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+    if (c && typeof c === "object") {
+      const v = (c as { value?: unknown; email?: unknown }).value ?? (c as { email?: unknown }).email;
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+  }
+  return "";
+}
+
+function ErrorBanner({
+  label,
+  query,
+}: {
+  label: string;
+  query: { error: unknown; isError: boolean; refetch: () => void };
+}) {
+  if (!query.isError) return null;
+  const err = query.error;
+  const msg =
+    err instanceof N3Error
+      ? err.message
+      : err instanceof Error
+        ? err.message
+        : "Request failed";
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+      <span>
+        <strong>{label}:</strong> {msg}
+      </span>
+      <button type="button" className="app-btn" onClick={() => query.refetch()}>
+        Retry
+      </button>
+    </div>
   );
 }
 
@@ -403,8 +578,6 @@ function DetailGrid({
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
 
-  // Keyboard: Enter moves to the next editable input; on final field of the
-  // final row, add a new line. We rely on the grid's DOM order via [tabIndex].
   const handleGridKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Enter") return;
     const target = e.target as HTMLElement;
@@ -423,7 +596,6 @@ function DetailGrid({
       next.select?.();
     } else {
       onAdd();
-      // Focus the first input of the newly-added row on the next tick.
       requestAnimationFrame(() => {
         const refreshed = Array.from(
           gridRef.current?.querySelectorAll<HTMLInputElement>(
@@ -441,8 +613,7 @@ function DetailGrid({
         <div>
           <h2 className="text-sm font-semibold">Invoice Lines</h2>
           <p className="text-[11px] text-muted-foreground">
-            Tab / Shift+Tab to move · Enter confirms selection or advances · Net = Qty × Unit
-            Price (N3 handles final tax &amp; totals)
+            Phase 2 wires WBS / GL / Cost Centre / Tax lookups · Net = Qty × Unit Price
           </p>
         </div>
         <button type="button" className="app-btn" onClick={onAdd}>
@@ -517,7 +688,10 @@ function DetailGrid({
           </tbody>
           <tfoot>
             <tr className="border-t-2 border-border-strong bg-surface-2">
-              <td colSpan={COLS.length - 1} className="px-2 py-2 text-right text-xs font-semibold uppercase text-muted-foreground">
+              <td
+                colSpan={COLS.length - 1}
+                className="px-2 py-2 text-right text-xs font-semibold uppercase text-muted-foreground"
+              >
                 Line subtotal (MYR)
               </td>
               <td className="px-2 py-2 text-right tabular font-semibold">
