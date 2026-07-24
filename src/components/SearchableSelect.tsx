@@ -56,6 +56,13 @@ export interface SearchableSelectProps {
   withPopoverSearch?: boolean;
   /** Shown as an empty-state hint when options.length === 0 and !loading. */
   emptyMessage?: string;
+  /**
+   * Minimum popover width in CSS pixels. Applies only when popoverPortal is
+   * true. Clamped to the viewport so the popover always stays on screen.
+   * Used to give Supplier/WBS/GL dropdowns enough room to render one-line
+   * option labels without truncation.
+   */
+  minPopoverWidth?: number;
 }
 
 export function SearchableSelect({

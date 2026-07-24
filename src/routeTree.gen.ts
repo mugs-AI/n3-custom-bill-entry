@@ -15,6 +15,7 @@ import { Route as HistoryRouteImport } from './routes/history'
 import { Route as DevLoginRouteImport } from './routes/dev-login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
+import { Route as ApiBillsCreateRouteImport } from './routes/api/bills/create'
 import { Route as ApiAuthDevConnectRouteImport } from './routes/api/auth/dev-connect'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -47,6 +48,11 @@ const ApiProxySplatRoute = ApiProxySplatRouteImport.update({
   path: '/api/proxy/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiBillsCreateRoute = ApiBillsCreateRouteImport.update({
+  id: '/api/bills/create',
+  path: '/api/bills/create',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthDevConnectRoute = ApiAuthDevConnectRouteImport.update({
   id: '/api/auth/dev-connect',
   path: '/api/auth/dev-connect',
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
+  '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
 }
 export interface FileRoutesByTo {
@@ -69,6 +76,7 @@ export interface FileRoutesByTo {
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
+  '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
 }
 export interface FileRoutesById {
@@ -79,6 +87,7 @@ export interface FileRoutesById {
   '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
+  '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
 }
 export interface FileRouteTypes {
@@ -90,6 +99,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/api/auth/dev-connect'
+    | '/api/bills/create'
     | '/api/proxy/$'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/api/auth/dev-connect'
+    | '/api/bills/create'
     | '/api/proxy/$'
   id:
     | '__root__'
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/reports'
     | '/settings'
     | '/api/auth/dev-connect'
+    | '/api/bills/create'
     | '/api/proxy/$'
   fileRoutesById: FileRoutesById
 }
@@ -118,6 +130,7 @@ export interface RootRouteChildren {
   ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
   ApiAuthDevConnectRoute: typeof ApiAuthDevConnectRoute
+  ApiBillsCreateRoute: typeof ApiBillsCreateRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
 }
 
@@ -165,6 +178,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiProxySplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/bills/create': {
+      id: '/api/bills/create'
+      path: '/api/bills/create'
+      fullPath: '/api/bills/create'
+      preLoaderRoute: typeof ApiBillsCreateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/dev-connect': {
       id: '/api/auth/dev-connect'
       path: '/api/auth/dev-connect'
@@ -182,18 +202,9 @@ const rootRouteChildren: RootRouteChildren = {
   ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
   ApiAuthDevConnectRoute: ApiAuthDevConnectRoute,
+  ApiBillsCreateRoute: ApiBillsCreateRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
