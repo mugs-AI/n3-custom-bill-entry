@@ -1,28 +1,28 @@
 import {
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
 // Keyboard-first accessible combobox/listbox.
 //
-// Behaviour contract (Phase 1 Correction B):
-//  - Selecting an option commits immediately: the visible text updates to the
-//    selected label BEFORE any parent effect (e.g. detail fetch) resolves.
-//    We do NOT rely on the input losing focus to reveal the selected label.
-//  - `query` is null unless the user is actively editing; the display then
-//    falls back to `selectedLabel` (parent-supplied) or the label found in
-//    `options` for `value`.
-//  - Arrow keys / Home / End move the active option and always scroll it into
-//    view (`scrollIntoView({ block: "nearest" })`) so the highlight stays
-//    visible past the initial viewport of the popover.
-//  - preventDefault on all navigation keys stops the page itself from
-//    scrolling.
-//  - `aria-activedescendant` links input focus to the active option; roles
-//    combobox / listbox / option are applied per WAI-ARIA APG.
+// Behaviour contract:
+//  - Selecting an option commits immediately; the input shows the label BEFORE
+//    any parent effect resolves. `query` stays null unless the user is editing.
+//  - Arrow / Home / End move the highlight and always scrollIntoView it.
+//  - Enter commits the highlighted option (or calls onEnter if no dropdown is
+//    open). We preventDefault so form submission never fires, but we do NOT
+//    stopPropagation — the enclosing grid handler listens for Enter to advance
+//    focus to the next field. That makes the whole row navigate on Enter.
+//  - `popoverPortal` renders the option list in a fixed-positioned portal so
+//    it escapes clipping by an ancestor `overflow-*` container (the invoice
+//    detail grid needs horizontal scroll but the popover must remain visible).
 
 export interface ComboOption {
   value: string;
@@ -40,12 +40,11 @@ export interface SearchableSelectProps {
   disabled?: boolean;
   className?: string;
   ariaLabel?: string;
-  /**
-   * Optional label to display for the currently-selected value when it may
-   * not yet exist in `options` (e.g. selection made from an outer list while
-   * the option list is still hydrating). Falls back to a lookup in `options`.
-   */
   selectedLabel?: string | null;
+  /** Render the popover via a document portal with fixed positioning. */
+  popoverPortal?: boolean;
+  /** Optional visual variant for embedded grid cells (removes chrome). */
+  compact?: boolean;
 }
 
 export function SearchableSelect({
@@ -59,16 +58,18 @@ export function SearchableSelect({
   className,
   ariaLabel,
   selectedLabel,
+  popoverPortal,
+  compact,
 }: SearchableSelectProps) {
   const listId = useId();
   const optId = (i: number) => `${listId}-opt-${i}`;
   const [open, setOpen] = useState(false);
-  // `null` = not editing; the display then shows the committed label.
   const [query, setQuery] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const [popStyle, setPopStyle] = useState<CSSProperties>({});
 
   const committedLabel = useMemo(() => {
     if (selectedLabel != null) return selectedLabel;
@@ -91,12 +92,10 @@ export function SearchableSelect({
       .slice(0, 500);
   }, [options, query]);
 
-  // Keep highlight in range as the filtered list changes.
   useEffect(() => {
     if (highlight >= filtered.length) setHighlight(0);
   }, [filtered.length, highlight]);
 
-  // Scroll the active option into view whenever it changes while open.
   useEffect(() => {
     if (!open) return;
     const ul = listRef.current;
@@ -105,19 +104,43 @@ export function SearchableSelect({
     el?.scrollIntoView({ block: "nearest" });
   }, [highlight, open, filtered.length]);
 
-  // Close on outside click.
+  // Position the portal popover under the input, using fixed coords so an
+  // ancestor scroll container cannot clip it. Reposition on scroll/resize.
+  useLayoutEffect(() => {
+    if (!open || !popoverPortal) return;
+    const update = () => {
+      const el = inputRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setPopStyle({
+        position: "fixed",
+        top: Math.round(r.bottom + 4),
+        left: Math.round(r.left),
+        width: Math.round(Math.max(r.width, 240)),
+        zIndex: 60,
+      });
+    };
+    update();
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [open, popoverPortal, filtered.length]);
+
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      if (listRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
   const commit = (opt: ComboOption | null) => {
-    // Commit synchronously: parent receives new value AND our own display
-    // stops showing the query, so the label appears on the very next render.
     onChange(opt);
     setQuery(null);
     setOpen(false);
@@ -129,9 +152,7 @@ export function SearchableSelect({
       case "ArrowDown":
         e.preventDefault();
         setOpen(true);
-        setHighlight((h) =>
-          Math.min(h + 1, Math.max(0, filtered.length - 1)),
-        );
+        setHighlight((h) => Math.min(h + 1, Math.max(0, filtered.length - 1)));
         return;
       case "ArrowUp":
         e.preventDefault();
@@ -158,16 +179,62 @@ export function SearchableSelect({
         }
         return;
       case "Enter":
+        // preventDefault stops form submission. Do NOT stopPropagation — the
+        // enclosing grid uses Enter to advance focus to the next field.
         e.preventDefault();
-        e.stopPropagation();
         if (open && filtered[highlight]) {
           commit(filtered[highlight]);
-          return;
         }
         onEnter?.();
         return;
     }
   };
+
+  const list = (
+    <ul
+      id={listId}
+      ref={listRef}
+      role="listbox"
+      style={popoverPortal ? popStyle : undefined}
+      className={
+        popoverPortal
+          ? "max-h-64 overflow-auto rounded-md border border-border-strong bg-surface shadow-lg"
+          : "absolute z-30 mt-1 max-h-64 w-full min-w-[220px] overflow-auto rounded-md border border-border-strong bg-surface shadow-lg"
+      }
+    >
+      {loading && (
+        <li className="px-3 py-2 text-xs text-muted-foreground">Loading…</li>
+      )}
+      {!loading && filtered.length === 0 && (
+        <li className="px-3 py-2 text-xs text-muted-foreground">No matches</li>
+      )}
+      {filtered.map((opt, i) => (
+        <li
+          key={opt.value}
+          id={optId(i)}
+          role="option"
+          aria-selected={opt.value === value}
+          className={`cursor-pointer px-3 py-1.5 text-sm ${
+            i === highlight ? "bg-primary text-primary-foreground" : ""
+          }`}
+          onMouseEnter={() => setHighlight(i)}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            commit(opt);
+          }}
+        >
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="font-medium">{opt.label}</span>
+            {opt.hint && (
+              <span className="text-[11px] text-muted-foreground">
+                {opt.hint}
+              </span>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
 
   return (
     <div ref={containerRef} className={`relative ${className ?? ""}`}>
@@ -181,15 +248,12 @@ export function SearchableSelect({
         aria-activedescendant={
           open && filtered[highlight] ? optId(highlight) : undefined
         }
-        className="app-input"
+        className={compact ? "app-input h-8 px-2 py-1 text-[13px]" : "app-input"}
         placeholder={placeholder}
         value={shownValue}
         disabled={disabled}
         onFocus={() => {
           setOpen(true);
-          // Select existing text so typing replaces it, but leave `query`
-          // as-null so the committed label stays visible until the user
-          // actually edits.
           requestAnimationFrame(() => inputRef.current?.select());
         }}
         onChange={(e) => {
@@ -199,7 +263,7 @@ export function SearchableSelect({
         }}
         onKeyDown={handleKeyDown}
       />
-      {committedLabel && !open && (
+      {committedLabel && !open && !compact && (
         <button
           type="button"
           tabIndex={-1}
@@ -213,46 +277,10 @@ export function SearchableSelect({
           ×
         </button>
       )}
-      {open && (
-        <ul
-          id={listId}
-          ref={listRef}
-          role="listbox"
-          className="absolute z-30 mt-1 max-h-64 w-full min-w-[220px] overflow-auto rounded-md border border-border-strong bg-surface shadow-lg"
-        >
-          {loading && (
-            <li className="px-3 py-2 text-xs text-muted-foreground">Loading…</li>
-          )}
-          {!loading && filtered.length === 0 && (
-            <li className="px-3 py-2 text-xs text-muted-foreground">No matches</li>
-          )}
-          {filtered.map((opt, i) => (
-            <li
-              key={opt.value}
-              id={optId(i)}
-              role="option"
-              aria-selected={opt.value === value}
-              className={`cursor-pointer px-3 py-1.5 text-sm ${
-                i === highlight ? "bg-primary text-primary-foreground" : ""
-              }`}
-              onMouseEnter={() => setHighlight(i)}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                commit(opt);
-              }}
-            >
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="font-medium">{opt.label}</span>
-                {opt.hint && (
-                  <span className="text-[11px] text-muted-foreground">
-                    {opt.hint}
-                  </span>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      {open &&
+        (popoverPortal && typeof document !== "undefined"
+          ? createPortal(list, document.body)
+          : list)}
     </div>
   );
 }
