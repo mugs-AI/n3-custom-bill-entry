@@ -955,6 +955,9 @@ function BillForm() {
           description: l.itemDescription,
           qty: Number(l.qty),
           unitPrice: Number(l.unitPrice),
+          // Rate factor from N3 TaxCodeLookupDto.rate (0.05 for PT-5%). Server
+          // re-validates and mirrors the calculation before POST.
+          taxRateFactor: rateFactorForLine(l),
           referenceNo: l.refNo,
         })),
       };
@@ -972,6 +975,12 @@ function BillForm() {
       };
       if (res.ok && d.ok && d.docCode) {
         clearDraft();
+        // Invalidate History cache so the new invoice appears immediately.
+        try {
+          queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY });
+        } catch {
+          /* best effort */
+        }
         setSave({ status: "success", docCode: d.docCode, message: "Saved to N3" });
       } else {
         setSave({
@@ -993,7 +1002,7 @@ function BillForm() {
   };
 
   if (save.status === "success" && save.docCode) {
-    return <SuccessPanel docCode={save.docCode} onNew={resetForm} />;
+    return <SuccessPanel docCode={save.docCode} onNew={resetForm} navigate={navigate} />;
   }
 
   return (
