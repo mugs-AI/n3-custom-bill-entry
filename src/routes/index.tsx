@@ -528,8 +528,83 @@ function BillForm() {
     return t ? `${t.code ?? ""} — ${t.description ?? ""}`.trim() : termLabelDraft;
   }, [termsQ.data, termId, termLabelDraft]);
 
-  const lineNet = useCallback((l: DetailLine) => multiplyDecimal(l.qty, l.unitPrice), []);
-  const totalNet = useMemo(() => sumTo2dp(lines.map(lineNet)), [lines, lineNet]);
+  // Map: taxCodeId -> numeric rate (%). Prefer the value the N3 Tax Code list
+  // returns on `rate` (or `taxRate` on some tenants). Missing entries default
+  // to 0, which produces tax = 0 without breaking net calculation.
+  const taxRateFromList = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const t of taxCodesQ.data ?? []) {
+      const r = typeof t.rate === "number" ? t.rate : typeof t.taxRate === "number" ? t.taxRate : undefined;
+      if (r != null && Number.isFinite(r)) m.set(t.id, r);
+    }
+    return m;
+  }, [taxCodesQ.data]);
+
+  // Detail fallback for any selected tax code whose list row lacked a rate.
+  const [taxRateDetail, setTaxRateDetail] = useState<Map<number, number>>(() => new Map());
+  useEffect(() => {
+    const selected = new Set<number>();
+    for (const l of lines) if (l.taxCodeId != null) selected.add(l.taxCodeId);
+    const missing: number[] = [];
+    for (const id of selected) {
+      if (!taxRateFromList.has(id) && !taxRateDetail.has(id)) missing.push(id);
+    }
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const updates = new Map(taxRateDetail);
+      for (const id of missing) {
+        try {
+          const d = await n3Call<TaxCodeDetail>(`api/TaxCodes/${id}`);
+          const r =
+            typeof d?.rate === "number"
+              ? d.rate
+              : typeof d?.taxRate === "number"
+                ? d.taxRate
+                : 0;
+          updates.set(id, Number.isFinite(r) ? r : 0);
+        } catch {
+          updates.set(id, 0);
+        }
+      }
+      if (!cancelled) setTaxRateDetail(updates);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lines, taxRateFromList, taxRateDetail]);
+
+  const rateForLine = useCallback(
+    (l: DetailLine): number => {
+      if (l.taxCodeId == null) return 0;
+      const r = taxRateFromList.get(l.taxCodeId) ?? taxRateDetail.get(l.taxCodeId);
+      return typeof r === "number" && Number.isFinite(r) ? r : 0;
+    },
+    [taxRateFromList, taxRateDetail],
+  );
+
+  const amountsFor = useCallback(
+    (l: DetailLine): LineAmounts =>
+      computeLine({
+        qty: l.qty,
+        unitPrice: l.unitPrice,
+        rate: rateForLine(l),
+        inclusive: isTaxInclusive,
+      }),
+    [rateForLine, isTaxInclusive],
+  );
+
+  const lineNet = useCallback((l: DetailLine) => amountsFor(l).net, [amountsFor]);
+  const lineTax = useCallback((l: DetailLine) => amountsFor(l).tax, [amountsFor]);
+  const lineGrand = useCallback((l: DetailLine) => amountsFor(l).grand, [amountsFor]);
+  const totals = useMemo(() => {
+    const all = lines.map(amountsFor);
+    return {
+      subTotal: sumTo2dp(all.map((a) => a.net)),
+      totalTax: sumTo2dp(all.map((a) => a.tax)),
+      grandTotal: sumTo2dp(all.map((a) => a.grand)),
+    };
+  }, [lines, amountsFor]);
 
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
   const removeLine = (key: string) =>
