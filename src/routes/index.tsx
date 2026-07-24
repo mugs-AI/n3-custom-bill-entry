@@ -275,6 +275,37 @@ function initialFormFromDraft(d: BillDraft | null) {
       lines: [emptyLine()],
     };
   }
+  const lines = d.lines.map(
+    (l): DetailLine => ({
+      key: l.key,
+      // n3Id is DraftLine-only metadata that stays on DetailLine for edit-mode
+      // Update payloads.
+      ...(l.n3Id ? { n3Id: l.n3Id } : {}),
+      stockId: l.stockId,
+      stockCode: l.stockCode,
+      stockName: l.stockName,
+      itemDescription: l.itemDescription,
+      itemDescriptionTouched: l.itemDescriptionTouched,
+      uomId: l.uomId,
+      uomCode: l.uomCode,
+      uomError: null,
+      glAccountId: l.glAccountId,
+      glAccountCode: l.glAccountCode,
+      glAccountName: l.glAccountName,
+      projectId: l.projectId,
+      projectCode: l.projectCode,
+      projectName: l.projectName,
+      taxCodeId: l.taxCodeId,
+      taxCodeCode: l.taxCodeCode,
+      taxCodeName: l.taxCodeName,
+      tariffCodeId: l.tariffCodeId,
+      tariffCodeCode: l.tariffCodeCode,
+      tariffCodeName: l.tariffCodeName,
+      qty: l.qty,
+      unitPrice: l.unitPrice,
+      refNo: l.refNo,
+    }),
+  );
   return {
     docDate: d.docDate || todayISOInKL(),
     supplierId: d.supplierId,
@@ -288,7 +319,7 @@ function initialFormFromDraft(d: BillDraft | null) {
     referenceNo: d.referenceNo,
     supplierInvNo: d.supplierInvNo,
     isTaxInclusive: d.isTaxInclusive,
-    lines: d.lines.map((l): DetailLine => ({ ...l, uomError: null })),
+    lines: lines.length > 0 ? lines : [emptyLine()],
   };
 }
 
