@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { AppShell } from "@/components/AppShell";
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/history")({
   component: HistoryPage,
 });
 
-// PurchaseInvoiceListDto — only fields we consume on the history grid.
+// PurchaseInvoiceListDto fields we consume.
 interface PurchaseInvoiceRow {
   id?: string;
   docCode?: string;
@@ -48,10 +48,8 @@ interface PurchaseInvoiceRow {
   isCancelled?: boolean;
   netTotalAmount?: number;
   taxTotalAmount?: number;
-  outstandingAmount?: number;
-  currencyCode?: string;
-  supplier?: { id?: number; code?: string; name?: string } | null;
-  purchaser?: { id?: number; code?: string; name?: string } | null;
+  supplier?: { code?: string; name?: string } | null;
+  purchaser?: { code?: string; name?: string } | null;
   term?: { code?: string; description?: string } | null;
 }
 
@@ -69,11 +67,13 @@ function HistoryPage() {
   const navigate = Route.useNavigate();
 
   const [inputQ, setInputQ] = useState<string>(search.q ?? "");
+  const [detailId, setDetailId] = useState<string | null>(null);
+
   const q = (search.q ?? "").trim();
   const page = search.page ?? 1;
 
-  // Keep the local input in sync when the URL param changes (e.g. after
-  // navigating from the New Bill Entry success screen with ?q=DOCCODE).
+  // Keep local input aligned with the URL param — matters after the New Bill
+  // Entry success flow navigates here with ?q=DOCCODE.
   useEffect(() => {
     setInputQ(search.q ?? "");
   }, [search.q]);
@@ -84,8 +84,7 @@ function HistoryPage() {
     queryKey: [...HISTORY_QUERY_KEY, { q, page }],
     enabled: hydrated && !!token,
     placeholderData: keepPreviousData,
-    retry: (count, err) =>
-      err instanceof N3Error && err.status === 401 ? false : count < 1,
+    retry: (count, err) => (err instanceof N3Error && err.status === 401 ? false : count < 1),
     queryFn: ({ signal }) =>
       n3Call<PageEnvelope>("api/PurchaseInvoices/Query", {
         method: "GET",
@@ -112,14 +111,12 @@ function HistoryPage() {
   return (
     <AppShell>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">Purchase Invoice History</h1>
-            <p className="text-sm text-muted-foreground">
-              Live from N3 · newest first · search by PI No, Supplier INV#, Supplier Code, HQ
-              Sequence, or Reference No.
-            </p>
-          </div>
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Purchase Invoice History</h1>
+          <p className="text-sm text-muted-foreground">
+            Live from N3 · newest first · search by PI No, Supplier INV#, Supplier Code, HQ
+            Sequence, or Reference No.
+          </p>
         </div>
 
         <form
@@ -175,7 +172,7 @@ function HistoryPage() {
           </div>
         ) : (
           <>
-            <HistoryTable rows={rows} loading={query.isLoading} onRowClick={(id) => setDetail(id)} />
+            <HistoryTable rows={rows} loading={query.isLoading} onRowClick={setDetailId} />
             <Pager
               page={page}
               totalPages={totalPages}
@@ -185,17 +182,10 @@ function HistoryPage() {
           </>
         )}
       </div>
-      {detailId && <DetailPanel id={detailId} onClose={() => setDetail(null)} />}
+      {detailId && <DetailPanel id={detailId} onClose={() => setDetailId(null)} />}
     </AppShell>
   );
-
-  // Detail modal state lives at the bottom to keep the render tree simple.
-  function setDetail(id: string | null) {
-    setDetailId(id);
-  }
 }
-
-// -------------------- table + pagination --------------------
 
 function HistoryTable({
   rows,
@@ -238,10 +228,9 @@ function HistoryTable({
             const tax = r.taxTotalAmount ?? 0;
             const sub = net - tax;
             const supplierCode =
-              r.supplier?.code ??
-              r.companyCode ??
-              (r.billFrom ? r.billFrom.split(" ")[0] : "");
+              r.supplier?.code ?? r.companyCode ?? (r.billFrom ? r.billFrom.split(" ")[0] : "");
             const supplierName = r.supplier?.name ?? r.companyName ?? r.billFrom ?? "";
+            const desc = r.description ?? "";
             return (
               <tr
                 key={r.id ?? r.docCode}
@@ -255,8 +244,8 @@ function HistoryTable({
                   <div>{supplierName}</div>
                 </Td>
                 <Td>{r.supplierInvNo}</Td>
-                <Td className="max-w-[220px] truncate" title={r.description ?? ""}>
-                  {r.description}
+                <Td className="max-w-[220px] truncate">
+                  <span title={desc}>{desc}</span>
                 </Td>
                 <Td>
                   {r.purchaser?.code ?? ""}
@@ -331,8 +320,6 @@ function Pager({
   );
 }
 
-// -------------------- detail modal --------------------
-
 interface PurchaseInvoiceDetail {
   id?: string;
   docCode?: string;
@@ -362,7 +349,6 @@ interface PurchaseInvoiceDetail {
   }>;
 }
 
-import { useCallback } from "react";
 function DetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
   const q = useQuery({
     queryKey: [...HISTORY_QUERY_KEY, "detail", id],
@@ -370,9 +356,12 @@ function DetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
       n3Call<PurchaseInvoiceDetail>(`api/PurchaseInvoices/${id}`, { signal }),
     staleTime: 30_000,
   });
-  const escape = useCallback((e: KeyboardEvent) => {
-    if (e.key === "Escape") onClose();
-  }, [onClose]);
+  const escape = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    },
+    [onClose],
+  );
   useEffect(() => {
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
@@ -386,10 +375,7 @@ function DetailPanel({ id, onClose }: { id: string; onClose: () => void }) {
       aria-modal="true"
       onClick={onClose}
     >
-      <div
-        className="app-card mt-16 w-full max-w-3xl p-5"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="app-card mt-16 w-full max-w-3xl p-5" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-semibold">Purchase Invoice · {d?.docCode ?? "…"}</h2>
           <button type="button" className="app-btn" onClick={onClose}>
@@ -493,9 +479,13 @@ function TotalRow({
   bold?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between ${bold ? "border-t border-border pt-1" : ""}`}>
+    <div
+      className={`flex items-center justify-between ${bold ? "border-t border-border pt-1" : ""}`}
+    >
       <span
-        className={`text-xs uppercase ${bold ? "font-bold" : "font-semibold text-muted-foreground"}`}
+        className={`text-xs uppercase ${
+          bold ? "font-bold" : "font-semibold text-muted-foreground"
+        }`}
       >
         {label}
       </span>
@@ -503,19 +493,3 @@ function TotalRow({
     </div>
   );
 }
-
-// Detail state — placed at the module level via a small local hook wrapper
-// so the outer component can toggle it. Kept simple with a useState-inside-
-// component pattern via closure.
-function useDetailState() {
-  const [id, setId] = useState<string | null>(null);
-  return { id, setId } as const;
-}
-// The outer component reads `detailId` from a closure; wire via a hook that
-// lifts state up.
-// eslint-disable-next-line react-hooks/rules-of-hooks
-const { id: detailId, setId: setDetailId } = ((): { id: string | null; setId: (v: string | null) => void } => {
-  // Placeholder to satisfy TS; real state is created via `useHistoryDetail` below.
-  return { id: null, setId: () => {} };
-})();
-void useDetailState;
