@@ -1373,14 +1373,14 @@ function LineList({
   layout,
   onAdd,
   onRemove,
-  totalNet,
+  totals,
   ...ctx
 }: LineCtx & {
   lines: DetailLine[];
   layout: ItemLayout;
   onAdd: () => void;
   onRemove: (key: string) => void;
-  totalNet: number;
+  totals: { subTotal: number; totalTax: number; grandTotal: number };
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
 
@@ -1452,15 +1452,30 @@ function LineList({
         ))}
       </div>
 
-      <div className="flex items-center justify-between border-t-2 border-border-strong bg-surface-2 px-4 py-2">
-        <span className="text-xs font-semibold uppercase text-muted-foreground">
-          Line subtotal (MYR)
-        </span>
-        <span className="tabular font-semibold">{formatMoney(totalNet)}</span>
+      <div className="border-t-2 border-border-strong bg-surface-2 px-4 py-3">
+        <div className="ml-auto flex max-w-md flex-col gap-1 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase text-muted-foreground">
+              Sub Total (MYR)
+            </span>
+            <span className="tabular">{formatMoney(totals.subTotal)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase text-muted-foreground">
+              Total Tax (MYR)
+            </span>
+            <span className="tabular">{formatMoney(totals.totalTax)}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between border-t border-border pt-1">
+            <span className="text-xs font-bold uppercase">Grand Total (MYR)</span>
+            <span className="tabular text-base font-semibold">{formatMoney(totals.grandTotal)}</span>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
 
 function LineCard({
   line,
