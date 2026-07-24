@@ -1774,6 +1774,17 @@ function FieldCell({
           aria-label={`Net Amount line ${index + 1}`}
         />,
       );
+    case "taxAmount":
+      return wrap(
+        narrowClass,
+        <input
+          readOnly
+          tabIndex={-1}
+          className="app-input h-8 px-2 py-1 text-[13px] tabular text-right bg-muted"
+          value={formatMoney(ctx.lineTax(line))}
+          aria-label={`Tax Amount line ${index + 1}`}
+        />,
+      );
     case "refNo":
       return wrap(
         narrowClass,
@@ -1784,6 +1795,7 @@ function FieldCell({
           aria-label={`Ref No line ${index + 1}`}
         />,
       );
+
     default: {
       const _: never = id;
       void _;
