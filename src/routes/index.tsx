@@ -1098,9 +1098,13 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
     >
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">New Bill Entry</h1>
+          <h1 className="text-xl font-semibold tracking-tight">
+            {isEdit ? `Edit Purchase Invoice ${editedDocCode || ""}` : "New Bill Entry"}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Simplified Purchase Invoice · posts directly to N3 · MYR
+            {isEdit
+              ? "Changes update this Purchase Invoice in N3 · MYR"
+              : "Simplified Purchase Invoice · posts directly to N3 · MYR"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1110,16 +1114,22 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
             onClick={onReset}
             disabled={save.status === "saving"}
           >
-            Reset
+            {isEdit ? "Discard changes" : "Reset"}
           </button>
           <button
             type="button"
             disabled={save.status === "saving"}
             onClick={onSave}
             className="app-btn app-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-            title="Post the Purchase Invoice to N3"
+            title={isEdit ? "Update this Purchase Invoice in N3" : "Post the Purchase Invoice to N3"}
           >
-            {save.status === "saving" ? "Saving…" : "Save to N3"}
+            {save.status === "saving"
+              ? isEdit
+                ? "Updating…"
+                : "Saving…"
+              : isEdit
+                ? "Update in N3"
+                : "Save to N3"}
           </button>
         </div>
       </div>
