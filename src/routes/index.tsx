@@ -1212,18 +1212,21 @@ function BillForm() {
             <label className="app-label">Reference No.</label>
             <input className="app-input" value={refNo} onChange={(e) => setRefNo(e.target.value)} />
           </div>
-          <div>
-            <label className="app-label">
+          <div data-field="supplierInvNo">
+            <label className="app-label" htmlFor="supplier-inv-no">
               Supplier INV# <span className="text-destructive">*</span>
             </label>
             <input
+              id="supplier-inv-no"
               required
-              className="app-input"
+              className={`app-input ${invalidFields.has("supplierInvNo") ? "ring-2 ring-destructive/60" : ""}`}
               value={supplierInvNo}
               onChange={(e) => setSupplierInvNo(e.target.value)}
               placeholder="Duplicate check runs on save"
+              aria-invalid={invalidFields.has("supplierInvNo") || undefined}
             />
           </div>
+
 
           <div className="md:col-span-3 mt-1 flex items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-2">
             <label
