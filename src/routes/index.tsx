@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { SearchableSelect, type ComboOption } from "@/components/SearchableSelect";
@@ -8,6 +8,7 @@ import { setToken } from "@/lib/auth-store";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
 import { n3Call, n3ListAll, N3Error } from "@/lib/n3-client";
 import { todayISOInKL } from "@/lib/date-my";
+import { formatMoney, multiplyDecimal, sumTo2dp } from "@/lib/money";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -29,14 +30,18 @@ export const Route = createFileRoute("/")({
   component: NewBillEntry,
 });
 
-// -------- Types modelled on real N3 DTOs (verified against swagger). --------
-// SupplierListDto: id, code, name, address1..4, contactPerson, email, phoneNo1,
-//   phoneNo2, termCode, ...
-// SupplierDto (detail /api/Suppliers/{id}): id, code, name, address1..4,
-//   contactPerson, email, eInvoiceEmail, emailList[], phoneNo1, termId,
-//   term: { id, code, description }, ...
-// PurchaserDto: id, code, name, isActive, isDefault, ...
-// TermLookupDto (/api/Terms/Query): id, code, description, type, value.
+// ==================== DTO shapes (verified vs swagger) ====================
+// Suppliers:  /api/Suppliers/List, /api/Suppliers/{id}       (purchase-v1)
+// Purchasers: /api/Purchasers/Query                          (purchase-v1)
+// Terms:      /api/Terms/Query                               (platform-v1)
+// Stocks:     /api/Stocks/List — StockListDto                (stock-v1)
+//             /api/Stocks/{id} — StockDto with uoms[]        (stock-v1)
+// GL:         /api/AccountCodes/Leaf/Query — AccountCodeLookupDto (gl-v1)
+// Projects:   /api/Projects (OData) — ProjectLookupDto       (gl-v1)
+// Tax:        /api/TaxCodes/InputTax/Query — TaxCodeLookupDto (platform-v1)
+// Tariff:     /api/TariffCodes/Query — TariffCodeLookupDto   (referenced in
+//             multiple specs; if the endpoint 404s the field surfaces an
+//             inline error and other lookups continue to work.)
 
 interface SupplierList {
   id: number;
@@ -53,35 +58,93 @@ interface SupplierList {
   address4?: string;
   termCode?: string;
 }
-
 interface SupplierDetail extends SupplierList {
   eInvoiceEmail?: string;
   termId?: number;
   term?: { id?: number; code?: string; description?: string } | null;
 }
-
 interface Purchaser {
   id: number;
   code?: string;
   name?: string;
   isActive?: boolean;
 }
-
 interface Term {
   id: number;
   code?: string;
   description?: string;
 }
+interface StockListRow {
+  id: number;
+  code?: string;
+  name?: string;
+  description?: string;
+  baseUOM?: string;
+  isActive?: boolean;
+}
+interface Uom {
+  id: number;
+  code?: string;
+  description?: string;
+  isBase?: boolean;
+}
+interface StockDetail extends StockListRow {
+  uoms?: Uom[];
+}
+interface AccountCode {
+  id: number;
+  code?: string;
+  name?: string;
+  isActive?: boolean;
+}
+interface Project {
+  id: number;
+  code?: string;
+  name?: string;
+  isActive?: boolean;
+}
+interface TaxCode {
+  id: number;
+  code?: string;
+  rate?: number;
+  fullName?: string;
+  isActive?: boolean;
+  inactive?: boolean;
+}
+interface TariffCode {
+  id: number;
+  code?: string;
+  description?: string;
+  isActive?: boolean;
+}
 
 interface DetailLine {
   key: string;
+  // Stock (WBS) — commit label immediately, hydrate uomId in the background.
+  stockId: number | null;
   stockCode: string;
+  stockName: string;
   itemDescription: string;
+  uomId: number | null;
+  uomCode: string;
+  uomError: string | null;
+  // GL Account
+  glAccountId: number | null;
   glAccountCode: string;
   glAccountName: string;
-  costCentre: string;
-  hqTax: string;
-  orderNo: string;
+  // Cost Centre → Project (per-line)
+  projectId: number | null;
+  projectCode: string;
+  projectName: string;
+  // HQ Tax → Tax code
+  taxCodeId: number | null;
+  taxCodeCode: string;
+  taxCodeName: string;
+  // Order No. → Tariff code
+  tariffCodeId: number | null;
+  tariffCodeCode: string;
+  tariffCodeName: string;
+  // Numbers stored as strings for input control; math via decimal-safe helper.
   qty: string;
   unitPrice: string;
   refNo: string;
@@ -89,28 +152,31 @@ interface DetailLine {
 
 const emptyLine = (): DetailLine => ({
   key: crypto.randomUUID(),
+  stockId: null,
   stockCode: "",
+  stockName: "",
   itemDescription: "",
+  uomId: null,
+  uomCode: "",
+  uomError: null,
+  glAccountId: null,
   glAccountCode: "",
   glAccountName: "",
-  costCentre: "",
-  hqTax: "",
-  orderNo: "",
+  projectId: null,
+  projectCode: "",
+  projectName: "",
+  taxCodeId: null,
+  taxCodeCode: "",
+  taxCodeName: "",
+  tariffCodeId: null,
+  tariffCodeCode: "",
+  tariffCodeName: "",
   qty: "",
   unitPrice: "",
   refNo: "",
 });
 
 function NewBillEntry() {
-  // Root crash root cause: `?token=…` from N3 My Apps is present during SSR
-  // too, but SSR cannot read/write localStorage. If we render BillForm on the
-  // server (no token → NoAuthPanel) and then swap to BillForm on the client
-  // after capturing the token, React sees a fully different tree at hydration
-  // → hydration mismatch → error boundary → "This page didn't load".
-  //
-  // Fix: render a neutral shell on the server and defer the auth-dependent UI
-  // until after the first client render. Token capture from the URL runs in
-  // that same effect, BEFORE any protected N3 request can run.
   const hydrated = useHydrated();
   const token = useAuthToken();
   const [capturePhase, setCapturePhase] = useState<"pending" | "done">("pending");
@@ -124,14 +190,12 @@ function NewBillEntry() {
       const url = new URL(window.location.href);
       const t = url.searchParams.get("token");
       if (t) {
-        // Persist BEFORE cleaning the URL so a race that reads the URL later
-        // still finds the token in storage.
         setToken(t);
         url.searchParams.delete("token");
         window.history.replaceState({}, "", url.toString());
       }
     } catch {
-      // Fail-safe: never let URL parsing crash the app shell.
+      /* fail-safe */
     }
     setCapturePhase("done");
   }, []);
@@ -181,7 +245,7 @@ function NoAuthPanel() {
   );
 }
 
-// ------------------------------- The form -------------------------------
+// ============================== The form ==============================
 
 function BillForm() {
   const [docDate, setDocDate] = useState(() => todayISOInKL());
@@ -192,45 +256,91 @@ function BillForm() {
   const [description, setDescription] = useState("");
   const [refNo, setRefNo] = useState("");
   const [supplierInvNo, setSupplierInvNo] = useState("");
+  const [isTaxInclusive, setIsTaxInclusive] = useState(false);
   const [lines, setLines] = useState<DetailLine[]>(() => [emptyLine()]);
+
+  const noRetryOn401 = useCallback(
+    (count: number, err: unknown) =>
+      err instanceof N3Error && err.status === 401 ? false : count < 1,
+    [],
+  );
 
   const suppliersQ = useQuery({
     queryKey: ["n3", "suppliers"],
     queryFn: ({ signal }) =>
       n3ListAll<SupplierList>("api/Suppliers/List", { pageSize: 500, signal }),
     staleTime: 60_000,
-    retry: (count, err) => (err instanceof N3Error && err.status === 401 ? false : count < 1),
+    retry: noRetryOn401,
   });
-
   const purchasersQ = useQuery({
     queryKey: ["n3", "purchasers"],
     queryFn: ({ signal }) =>
       n3ListAll<Purchaser>("api/Purchasers/Query", { pageSize: 500, signal }),
     staleTime: 60_000,
-    retry: (count, err) => (err instanceof N3Error && err.status === 401 ? false : count < 1),
+    retry: noRetryOn401,
   });
-
   const termsQ = useQuery({
     queryKey: ["n3", "terms"],
     queryFn: ({ signal }) =>
       n3ListAll<Term>("api/Terms/Query", { pageSize: 500, signal }),
     staleTime: 5 * 60_000,
-    retry: (count, err) => (err instanceof N3Error && err.status === 401 ? false : count < 1),
+    retry: noRetryOn401,
+  });
+  const stocksQ = useQuery({
+    queryKey: ["n3", "stocks"],
+    queryFn: ({ signal }) =>
+      n3ListAll<StockListRow>("api/Stocks/List", { pageSize: 500, signal }),
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
+  });
+  const glAccountsQ = useQuery({
+    queryKey: ["n3", "glAccounts"],
+    queryFn: ({ signal }) =>
+      n3ListAll<AccountCode>("api/AccountCodes/Leaf/Query", {
+        pageSize: 500,
+        signal,
+      }),
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
+  });
+  const projectsQ = useQuery({
+    queryKey: ["n3", "projects"],
+    queryFn: ({ signal }) =>
+      n3ListAll<Project>("api/Projects", { pageSize: 500, signal }),
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
+  });
+  const taxCodesQ = useQuery({
+    queryKey: ["n3", "taxCodes"],
+    queryFn: ({ signal }) =>
+      n3ListAll<TaxCode>("api/TaxCodes/InputTax/Query", {
+        pageSize: 500,
+        signal,
+      }),
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
+  });
+  const tariffCodesQ = useQuery({
+    queryKey: ["n3", "tariffCodes"],
+    queryFn: ({ signal }) =>
+      n3ListAll<TariffCode>("api/TariffCodes/Query", {
+        pageSize: 500,
+        signal,
+      }),
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
   });
 
-  // Hydrate the selected Supplier's full record. The list DTO already includes
-  // address/contact/email/phone, but the fully-typed term relation only lives
-  // on SupplierDto — so we always fetch when a selection exists.
+  // Supplier detail hydration.
   const supplierDetailQ = useQuery({
     queryKey: ["n3", "supplier", supplierId],
     queryFn: ({ signal }) =>
       n3Call<SupplierDetail>(`api/Suppliers/${supplierId}`, { signal }),
     enabled: supplierId != null,
     staleTime: 30_000,
-    retry: (count, err) => (err instanceof N3Error && err.status === 401 ? false : count < 1),
+    retry: noRetryOn401,
   });
 
-  // Default Term from the supplier profile (only until the user picks one).
   useEffect(() => {
     if (termTouched) return;
     const detail = supplierDetailQ.data;
@@ -239,7 +349,6 @@ function BillForm() {
     setTermId(next);
   }, [supplierDetailQ.data, termTouched]);
 
-  // Clearing the Supplier resets every derived field consistently.
   useEffect(() => {
     if (supplierId == null) {
       setTermId(null);
@@ -247,17 +356,25 @@ function BillForm() {
     }
   }, [supplierId]);
 
-  // Case-insensitive, numeric-aware collator so "800-M002" sorts after
-  // "800-M009" the way a human expects, and names like "eastcom" / "EASTCOM"
-  // compare equal for ordering.
   const collator = useMemo(
     () => new Intl.Collator(undefined, { sensitivity: "base", numeric: true }),
     [],
   );
 
+  // Deduplicate + sort helpers.
+  const dedupe = useCallback(<T extends { id: number }>(rows: T[]): T[] => {
+    const seen = new Set<number>();
+    const out: T[] = [];
+    for (const r of rows) {
+      if (r?.id == null || seen.has(r.id)) continue;
+      seen.add(r.id);
+      out.push(r);
+    }
+    return out;
+  }, []);
+
   const supplierOptions: ComboOption[] = useMemo(() => {
-    const rows = (suppliersQ.data ?? []).slice();
-    // Sort by Supplier Name asc, Supplier Code tie-break, empty names last.
+    const rows = dedupe(suppliersQ.data ?? []).slice();
     rows.sort((a, b) => {
       const an = (a.name ?? "").trim();
       const bn = (b.name ?? "").trim();
@@ -272,46 +389,99 @@ function BillForm() {
       label: `${s.code ?? ""} — ${s.name ?? ""}`.trim(),
       hint: s.termCode ?? undefined,
     }));
-  }, [suppliersQ.data, collator]);
+  }, [suppliersQ.data, collator, dedupe]);
 
   const purchaserOptions: ComboOption[] = useMemo(
     () =>
-      (purchasersQ.data ?? [])
+      dedupe(purchasersQ.data ?? [])
         .filter((p) => p.isActive !== false)
         .map((p) => ({
           value: String(p.id),
           label: `${p.code ?? ""} — ${p.name ?? ""}`.trim(),
         })),
-    [purchasersQ.data],
+    [purchasersQ.data, dedupe],
   );
 
   const termOptions: ComboOption[] = useMemo(
     () =>
-      (termsQ.data ?? []).map((t) => ({
+      dedupe(termsQ.data ?? []).map((t) => ({
         value: String(t.id),
         label: `${t.code ?? ""} — ${t.description ?? ""}`.trim(),
       })),
-    [termsQ.data],
+    [termsQ.data, dedupe],
   );
 
-  // Fallback view = the row from the /Suppliers/List response for the
-  // currently-selected id. This lets Name/Address/Phone/Email/Contact/Term
-  // Code appear IMMEDIATELY on selection — the /Suppliers/{id} enrichment
-  // only overwrites or fills in properties the list DTO doesn't carry
-  // (termId, full Term relation, eInvoiceEmail, emailList).
+  const sortByCode = useCallback(
+    <T extends { code?: string; name?: string; description?: string }>(rows: T[]) => {
+      const out = rows.slice();
+      out.sort((a, b) => collator.compare(a.code ?? "", b.code ?? ""));
+      return out;
+    },
+    [collator],
+  );
+
+  const stockOptions: ComboOption[] = useMemo(() => {
+    const rows = sortByCode(
+      dedupe(stocksQ.data ?? []).filter((r) => r.isActive !== false),
+    );
+    return rows.map((r) => ({
+      value: String(r.id),
+      label: `${r.code ?? ""} — ${r.name ?? r.description ?? ""}`.trim(),
+    }));
+  }, [stocksQ.data, sortByCode, dedupe]);
+
+  const glOptions: ComboOption[] = useMemo(() => {
+    const rows = sortByCode(
+      dedupe(glAccountsQ.data ?? []).filter((r) => r.isActive !== false),
+    );
+    return rows.map((r) => ({
+      value: String(r.id),
+      label: `${r.code ?? ""} — ${r.name ?? ""}`.trim(),
+    }));
+  }, [glAccountsQ.data, sortByCode, dedupe]);
+
+  const projectOptions: ComboOption[] = useMemo(() => {
+    const rows = sortByCode(
+      dedupe(projectsQ.data ?? []).filter((r) => r.isActive !== false),
+    );
+    return rows.map((r) => ({
+      value: String(r.id),
+      label: `${r.code ?? ""} — ${r.name ?? ""}`.trim(),
+    }));
+  }, [projectsQ.data, sortByCode, dedupe]);
+
+  const taxOptions: ComboOption[] = useMemo(() => {
+    const rows = sortByCode(
+      dedupe(taxCodesQ.data ?? []).filter(
+        (r) => r.isActive !== false && r.inactive !== true,
+      ),
+    );
+    return rows.map((r) => ({
+      value: String(r.id),
+      label: `${r.code ?? ""} — ${r.fullName ?? ""}`.trim(),
+    }));
+  }, [taxCodesQ.data, sortByCode, dedupe]);
+
+  const tariffOptions: ComboOption[] = useMemo(() => {
+    const rows = sortByCode(
+      dedupe(tariffCodesQ.data ?? []).filter((r) => r.isActive !== false),
+    );
+    return rows.map((r) => ({
+      value: String(r.id),
+      label: `${r.code ?? ""} — ${r.description ?? ""}`.trim(),
+    }));
+  }, [tariffCodesQ.data, sortByCode, dedupe]);
+
   const listSupplier = useMemo<SupplierList | null>(() => {
     if (supplierId == null) return null;
     return (suppliersQ.data ?? []).find((s) => s.id === supplierId) ?? null;
   }, [suppliersQ.data, supplierId]);
 
-  // Guard against a stale detail response overwriting a newer selection.
-  // react-query keys by supplierId already, but defensively verify.
   const detail: SupplierDetail | null =
     supplierDetailQ.data && supplierDetailQ.data.id === supplierId
       ? supplierDetailQ.data
       : null;
 
-  // Merge: prefer detail fields when present, otherwise fall back to list.
   const supplierView = detail ?? listSupplier;
   const addressLines = [
     supplierView?.address1,
@@ -331,13 +501,13 @@ function BillForm() {
     : "";
   const enriching = supplierId != null && supplierDetailQ.isFetching;
 
+  const lineNet = useCallback(
+    (l: DetailLine) => multiplyDecimal(l.qty, l.unitPrice),
+    [],
+  );
   const totalNet = useMemo(
-    () =>
-      lines.reduce((sum, l) => {
-        const n = Number(l.qty) * Number(l.unitPrice);
-        return sum + (Number.isFinite(n) ? n : 0);
-      }, 0),
-    [lines],
+    () => sumTo2dp(lines.map(lineNet)),
+    [lines, lineNet],
   );
 
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
@@ -346,13 +516,62 @@ function BillForm() {
   const updateLine = (key: string, patch: Partial<DetailLine>) =>
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
 
+  // Look up utilities (keyed by immutable N3 id).
+  const stockById = useMemo(() => {
+    const m = new Map<number, StockListRow>();
+    for (const r of stocksQ.data ?? []) m.set(r.id, r);
+    return m;
+  }, [stocksQ.data]);
+  const glById = useMemo(() => {
+    const m = new Map<number, AccountCode>();
+    for (const r of glAccountsQ.data ?? []) m.set(r.id, r);
+    return m;
+  }, [glAccountsQ.data]);
+
+  const handleStockSelect = (line: DetailLine, opt: ComboOption | null) => {
+    if (!opt) {
+      updateLine(line.key, {
+        stockId: null,
+        stockCode: "",
+        stockName: "",
+        itemDescription: "",
+        uomId: null,
+        uomCode: "",
+        uomError: null,
+      });
+      return;
+    }
+    const id = Number(opt.value);
+    const row = stockById.get(id);
+    updateLine(line.key, {
+      stockId: id,
+      stockCode: row?.code ?? "",
+      stockName: row?.name ?? "",
+      itemDescription: row?.name ?? row?.description ?? "",
+      uomId: null,
+      uomCode: row?.baseUOM ?? "",
+      uomError: null,
+    });
+  };
+
+  const handleGlSelect = (line: DetailLine, opt: ComboOption | null) => {
+    if (!opt) {
+      updateLine(line.key, { glAccountId: null, glAccountCode: "", glAccountName: "" });
+      return;
+    }
+    const id = Number(opt.value);
+    const row = glById.get(id);
+    updateLine(line.key, {
+      glAccountId: id,
+      glAccountCode: row?.code ?? "",
+      glAccountName: row?.name ?? "",
+    });
+  };
+
   return (
     <form
       className="space-y-5"
-      onSubmit={(e) => {
-        // Save is intentionally disabled until Phase 2 wires the real POST.
-        e.preventDefault();
-      }}
+      onSubmit={(e) => e.preventDefault()}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
           const target = e.target as HTMLElement;
@@ -364,7 +583,7 @@ function BillForm() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">New Bill Entry</h1>
           <p className="text-sm text-muted-foreground">
-            Simplified Purchase Invoice · posts directly to N3 · MYR · Tax Inclusive off
+            Simplified Purchase Invoice · posts directly to N3 · MYR
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -374,7 +593,7 @@ function BillForm() {
           <button
             type="button"
             disabled
-            title="Purchase Invoice POST arrives in Phase 2"
+            title="Purchase Invoice POST arrives in Phase 2B"
             className="app-btn app-btn-primary cursor-not-allowed opacity-60"
           >
             Save to N3 · Available after Phase 2
@@ -386,8 +605,13 @@ function BillForm() {
       <ErrorBanner label="Purchasers" query={purchasersQ} />
       <ErrorBanner label="Terms" query={termsQ} />
       <ErrorBanner label="Supplier details" query={supplierDetailQ} />
+      <ErrorBanner label="Stocks (WBS)" query={stocksQ} />
+      <ErrorBanner label="GL Accounts" query={glAccountsQ} />
+      <ErrorBanner label="Projects (Cost Centre)" query={projectsQ} />
+      <ErrorBanner label="Tax Codes" query={taxCodesQ} />
+      <ErrorBanner label="Tariff Codes" query={tariffCodesQ} />
 
-      {/* Header card */}
+      {/* ================================= Header ================================= */}
       <div className="app-card p-5">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
@@ -399,9 +623,7 @@ function BillForm() {
             />
           </div>
           <div>
-            <label className="app-label" htmlFor="doc-date">
-              Document Date
-            </label>
+            <label className="app-label" htmlFor="doc-date">Document Date</label>
             <MyDateInput
               id="doc-date"
               value={docDate}
@@ -432,11 +654,7 @@ function BillForm() {
 
           <div className="md:col-span-2">
             <label className="app-label">Supplier Name</label>
-            <input
-              className="app-input"
-              readOnly
-              value={supplierName}
-            />
+            <input className="app-input" readOnly value={supplierName} />
           </div>
           <div>
             <label className="app-label">Payment Type (Purchaser)</label>
@@ -459,11 +677,7 @@ function BillForm() {
               role="group"
               aria-label="Supplier Address"
             >
-              {addressLines.length ? (
-                addressLines.join("\n")
-              ) : (
-                ""
-              )}
+              {addressLines.length ? addressLines.join("\n") : ""}
             </div>
           </div>
           <div>
@@ -528,8 +742,37 @@ function BillForm() {
               className="app-input"
               value={supplierInvNo}
               onChange={(e) => setSupplierInvNo(e.target.value)}
-              placeholder="Duplicate check on save (Phase 2)"
+              placeholder="Duplicate check on save (Phase 2B)"
             />
+          </div>
+
+          <div className="md:col-span-3 mt-1 flex items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-2">
+            <label
+              className="inline-flex cursor-pointer select-none items-center gap-2"
+              htmlFor="tax-inclusive"
+            >
+              <input
+                id="tax-inclusive"
+                type="checkbox"
+                role="switch"
+                aria-checked={isTaxInclusive}
+                checked={isTaxInclusive}
+                onChange={(e) => setIsTaxInclusive(e.target.checked)}
+                className="h-4 w-4 accent-[var(--color-primary)]"
+              />
+              <span className="text-sm font-medium">Tax Inclusive</span>
+            </label>
+            <span
+              className={`text-xs font-semibold ${
+                isTaxInclusive ? "text-primary" : "text-muted-foreground"
+              }`}
+              aria-hidden
+            >
+              {isTaxInclusive ? "ON" : "OFF"}
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              Defaults to OFF. Stored on the Purchase Invoice payload.
+            </span>
           </div>
         </div>
       </div>
@@ -540,13 +783,25 @@ function BillForm() {
         onRemove={removeLine}
         onChange={updateLine}
         totalNet={totalNet}
+        lineNet={lineNet}
+        stockOptions={stockOptions}
+        stocksLoading={stocksQ.isLoading}
+        glOptions={glOptions}
+        glLoading={glAccountsQ.isLoading}
+        projectOptions={projectOptions}
+        projectsLoading={projectsQ.isLoading}
+        taxOptions={taxOptions}
+        taxLoading={taxCodesQ.isLoading}
+        tariffOptions={tariffOptions}
+        tariffLoading={tariffCodesQ.isLoading}
+        onStockSelect={handleStockSelect}
+        onGlSelect={handleGlSelect}
       />
     </form>
   );
 }
 
-// Email may be a plain string, an object with `value`, or an array of either
-// (varies by e-invoice configuration). Pick the first non-empty string.
+// Email may be a plain string, an object with `value`, or an array of either.
 function pickEmail(detail: SupplierDetail | null): string {
   if (!detail) return "";
   const candidates: unknown[] = [
@@ -591,21 +846,7 @@ function ErrorBanner({
   );
 }
 
-// ------------------------------ Detail grid ------------------------------
-
-const COLS = [
-  { key: "stockCode", label: "WBS", width: "min-w-[110px]" },
-  { key: "itemDescription", label: "Item Description", width: "min-w-[220px]" },
-  { key: "glAccountCode", label: "GL Account", width: "min-w-[130px]" },
-  { key: "glAccountName", label: "GL Account Name", width: "min-w-[180px]", readOnly: true },
-  { key: "costCentre", label: "Cost Centre", width: "min-w-[140px]" },
-  { key: "hqTax", label: "HQ Tax", width: "min-w-[110px]" },
-  { key: "orderNo", label: "Order No.", width: "min-w-[120px]" },
-  { key: "qty", label: "Qty", width: "min-w-[80px]", numeric: true },
-  { key: "unitPrice", label: "Unit Price", width: "min-w-[110px]", numeric: true },
-  { key: "netAmount", label: "Net Amount", width: "min-w-[120px]", numeric: true, readOnly: true },
-  { key: "refNo", label: "Ref. No.", width: "min-w-[120px]" },
-] as const;
+// ============================== Detail grid ==============================
 
 function DetailGrid({
   lines,
@@ -613,41 +854,116 @@ function DetailGrid({
   onRemove,
   onChange,
   totalNet,
+  lineNet,
+  stockOptions,
+  stocksLoading,
+  glOptions,
+  glLoading,
+  projectOptions,
+  projectsLoading,
+  taxOptions,
+  taxLoading,
+  tariffOptions,
+  tariffLoading,
+  onStockSelect,
+  onGlSelect,
 }: {
   lines: DetailLine[];
   onAdd: () => void;
   onRemove: (key: string) => void;
   onChange: (key: string, patch: Partial<DetailLine>) => void;
   totalNet: number;
+  lineNet: (l: DetailLine) => number;
+  stockOptions: ComboOption[];
+  stocksLoading: boolean;
+  glOptions: ComboOption[];
+  glLoading: boolean;
+  projectOptions: ComboOption[];
+  projectsLoading: boolean;
+  taxOptions: ComboOption[];
+  taxLoading: boolean;
+  tariffOptions: ComboOption[];
+  tariffLoading: boolean;
+  onStockSelect: (line: DetailLine, opt: ComboOption | null) => void;
+  onGlSelect: (line: DetailLine, opt: ComboOption | null) => void;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
 
-  const handleGridKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "Enter") return;
-    const target = e.target as HTMLElement;
-    if (target.tagName !== "INPUT") return;
-    e.preventDefault();
-    const inputs = Array.from(
-      gridRef.current?.querySelectorAll<HTMLInputElement>(
-        "input:not([readonly]):not([disabled])",
+  // Move focus to the next tabbable field in the whole grid (spans rows).
+  // Skips readonly / disabled / tabindex="-1" so read-only cells (Item
+  // Description, GL Account Name, Net Amount) are automatically bypassed.
+  const advanceFocus = useCallback(() => {
+    const active = document.activeElement as HTMLElement | null;
+    const list = Array.from(
+      gridRef.current?.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
+        'input:not([readonly]):not([disabled]):not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"])',
       ) ?? [],
     );
-    const idx = inputs.indexOf(target as HTMLInputElement);
-    if (idx < 0) return;
-    const next = inputs[idx + 1];
+    const idx = active ? list.indexOf(active as HTMLInputElement) : -1;
+    const next = list[idx + 1];
     if (next) {
       next.focus();
-      next.select?.();
-    } else {
+      (next as HTMLInputElement).select?.();
+      return true;
+    }
+    return false;
+  }, []);
+
+  const handleGridKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const moved = advanceFocus();
+    if (!moved) {
+      // We were on the last editable field of the last line — create a new
+      // line and focus its first field once React has rendered it.
       onAdd();
       requestAnimationFrame(() => {
-        const refreshed = Array.from(
-          gridRef.current?.querySelectorAll<HTMLInputElement>(
-            "input:not([readonly]):not([disabled])",
+        const list = Array.from(
+          gridRef.current?.querySelectorAll<HTMLInputElement | HTMLButtonElement>(
+            'input:not([readonly]):not([disabled]):not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"])',
           ) ?? [],
         );
-        refreshed[inputs.length]?.focus();
+        const last = list[list.length - 1];
+        // The last element is the "Add line" button; we actually want the
+        // first field of the newly created line. Walk backward until the
+        // first field whose data-line-key matches the newly-added line.
+        const rows = gridRef.current?.querySelectorAll<HTMLElement>("[data-line-row]");
+        const lastRow = rows?.[rows.length - 1];
+        const firstFieldOfLast = lastRow?.querySelector<HTMLElement>(
+          'input:not([readonly]):not([disabled]):not([tabindex="-1"])',
+        );
+        (firstFieldOfLast ?? last)?.focus();
       });
+    }
+  };
+
+  const lineHasError = (l: DetailLine, field: keyof DetailLine): string | null => {
+    const anyFilled =
+      l.stockId != null ||
+      l.glAccountId != null ||
+      l.projectId != null ||
+      l.taxCodeId != null ||
+      l.tariffCodeId != null ||
+      l.qty.trim() !== "" ||
+      l.unitPrice.trim() !== "";
+    if (!anyFilled) return null;
+    switch (field) {
+      case "stockId":
+        return l.stockId == null ? "WBS required" : l.uomError;
+      case "glAccountId":
+        return l.glAccountId == null ? "GL required" : null;
+      case "projectId":
+        return l.projectId == null ? "Cost Centre required" : null;
+      case "taxCodeId":
+        return l.taxCodeId == null ? "Tax required" : null;
+      case "tariffCodeId":
+        return l.tariffCodeId == null ? "Tariff required" : null;
+      case "qty":
+        return Number(l.qty) > 0 ? null : "Qty > 0";
+      case "unitPrice":
+        return Number(l.unitPrice) >= 0 ? null : "Price ≥ 0";
+      default:
+        return null;
     }
   };
 
@@ -657,63 +973,260 @@ function DetailGrid({
         <div>
           <h2 className="text-sm font-semibold">Invoice Lines</h2>
           <p className="text-[11px] text-muted-foreground">
-            Phase 2 wires WBS / GL / Cost Centre / Tax lookups · Net = Qty × Unit Price
+            Live N3 masters · Enter advances field / creates line · Net = Qty × Unit Price
           </p>
         </div>
         <button type="button" className="app-btn" onClick={onAdd}>
           + Add line
         </button>
       </div>
+
       <div ref={gridRef} onKeyDown={handleGridKey} className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
+        <table className="w-full min-w-[1400px] border-collapse text-sm">
           <thead>
             <tr className="bg-surface-2 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
               <th className="w-8 px-2 py-2"></th>
-              {COLS.map((c) => (
-                <th key={c.key} className={`px-2 py-2 font-medium ${c.width}`}>
-                  {c.label}
-                </th>
-              ))}
+              <th className="min-w-[180px] px-2 py-2 font-medium">WBS</th>
+              <th className="min-w-[220px] px-2 py-2 font-medium">Item Description</th>
+              <th className="min-w-[160px] px-2 py-2 font-medium">GL Account</th>
+              <th className="min-w-[200px] px-2 py-2 font-medium">GL Account Name</th>
+              <th className="min-w-[180px] px-2 py-2 font-medium">Cost Centre</th>
+              <th className="min-w-[160px] px-2 py-2 font-medium">HQ Tax</th>
+              <th className="min-w-[160px] px-2 py-2 font-medium">Order No.</th>
+              <th className="min-w-[80px] px-2 py-2 font-medium text-right">Qty</th>
+              <th className="min-w-[110px] px-2 py-2 font-medium text-right">Unit Price</th>
+              <th className="min-w-[120px] px-2 py-2 font-medium text-right">Net Amount</th>
+              <th className="min-w-[130px] px-2 py-2 font-medium">Ref. No.</th>
               <th className="w-10 px-2 py-2"></th>
             </tr>
           </thead>
           <tbody>
             {lines.map((line, i) => {
-              const net = Number(line.qty) * Number(line.unitPrice);
+              const net = lineNet(line);
+              const stockLabel = line.stockId
+                ? `${line.stockCode} — ${line.stockName}`.trim()
+                : "";
+              const glLabel = line.glAccountId
+                ? `${line.glAccountCode} — ${line.glAccountName}`.trim()
+                : "";
+              const projectLabel = line.projectId
+                ? `${line.projectCode} — ${line.projectName}`.trim()
+                : "";
+              const taxLabel = line.taxCodeId
+                ? `${line.taxCodeCode} — ${line.taxCodeName}`.trim()
+                : "";
+              const tariffLabel = line.tariffCodeId
+                ? `${line.tariffCodeCode} — ${line.tariffCodeName}`.trim()
+                : "";
+              const stockErr = lineHasError(line, "stockId");
               return (
-                <tr key={line.key} className="grid-row-focus border-t border-border">
+                <tr
+                  key={line.key}
+                  data-line-row
+                  className="grid-row-focus border-t border-border align-top"
+                >
                   <td className="px-2 py-1.5 text-xs text-muted-foreground tabular">
                     {i + 1}
                   </td>
-                  {COLS.map((c) => {
-                    if (c.key === "netAmount") {
-                      return (
-                        <td key={c.key} className="px-2 py-1.5">
-                          <input
-                            readOnly
-                            className="app-input tabular text-right"
-                            value={Number.isFinite(net) ? net.toFixed(2) : "0.00"}
-                            tabIndex={-1}
-                          />
-                        </td>
-                      );
-                    }
-                    const readOnly = "readOnly" in c && c.readOnly;
-                    const numeric = "numeric" in c && c.numeric;
-                    return (
-                      <td key={c.key} className="px-2 py-1.5">
-                        <input
-                          className={`app-input ${numeric ? "tabular text-right" : ""}`}
-                          readOnly={readOnly}
-                          value={(line as unknown as Record<string, string>)[c.key] ?? ""}
-                          inputMode={numeric ? "decimal" : undefined}
-                          onChange={(e) =>
-                            onChange(line.key, { [c.key]: e.target.value } as Partial<DetailLine>)
-                          }
-                        />
-                      </td>
-                    );
-                  })}
+
+                  {/* WBS */}
+                  <td className="px-2 py-1.5">
+                    <SearchableSelect
+                      compact
+                      popoverPortal
+                      options={stockOptions}
+                      loading={stocksLoading}
+                      value={line.stockId != null ? String(line.stockId) : null}
+                      selectedLabel={stockLabel}
+                      onChange={(o) => onStockSelect(line, o)}
+                      placeholder={stocksLoading ? "Loading…" : "Code or name"}
+                      ariaLabel={`WBS line ${i + 1}`}
+                    />
+                    {stockErr && <FieldError text={stockErr} />}
+                  </td>
+
+                  {/* Item Description (read-only, skipped in tab order) */}
+                  <td className="px-2 py-1.5">
+                    <input
+                      readOnly
+                      tabIndex={-1}
+                      className="app-input h-8 px-2 py-1 text-[13px] bg-muted"
+                      value={line.itemDescription}
+                    />
+                  </td>
+
+                  {/* GL Account */}
+                  <td className="px-2 py-1.5">
+                    <SearchableSelect
+                      compact
+                      popoverPortal
+                      options={glOptions}
+                      loading={glLoading}
+                      value={line.glAccountId != null ? String(line.glAccountId) : null}
+                      selectedLabel={glLabel}
+                      onChange={(o) => onGlSelect(line, o)}
+                      placeholder={glLoading ? "Loading…" : "Code or name"}
+                      ariaLabel={`GL Account line ${i + 1}`}
+                    />
+                    {lineHasError(line, "glAccountId") && (
+                      <FieldError text={lineHasError(line, "glAccountId")!} />
+                    )}
+                  </td>
+
+                  {/* GL Account Name (read-only) */}
+                  <td className="px-2 py-1.5">
+                    <input
+                      readOnly
+                      tabIndex={-1}
+                      className="app-input h-8 px-2 py-1 text-[13px] bg-muted"
+                      value={line.glAccountName}
+                    />
+                  </td>
+
+                  {/* Cost Centre / Project */}
+                  <td className="px-2 py-1.5">
+                    <SearchableSelect
+                      compact
+                      popoverPortal
+                      options={projectOptions}
+                      loading={projectsLoading}
+                      value={line.projectId != null ? String(line.projectId) : null}
+                      selectedLabel={projectLabel}
+                      onChange={(o) => {
+                        if (!o) {
+                          onChange(line.key, {
+                            projectId: null,
+                            projectCode: "",
+                            projectName: "",
+                          });
+                          return;
+                        }
+                        onChange(line.key, {
+                          projectId: Number(o.value),
+                          projectCode: o.label.split(" — ")[0] ?? "",
+                          projectName: o.label.split(" — ")[1] ?? "",
+                        });
+                      }}
+                      placeholder={projectsLoading ? "Loading…" : "Code or name"}
+                      ariaLabel={`Cost Centre line ${i + 1}`}
+                    />
+                    {lineHasError(line, "projectId") && (
+                      <FieldError text={lineHasError(line, "projectId")!} />
+                    )}
+                  </td>
+
+                  {/* HQ Tax */}
+                  <td className="px-2 py-1.5">
+                    <SearchableSelect
+                      compact
+                      popoverPortal
+                      options={taxOptions}
+                      loading={taxLoading}
+                      value={line.taxCodeId != null ? String(line.taxCodeId) : null}
+                      selectedLabel={taxLabel}
+                      onChange={(o) => {
+                        if (!o) {
+                          onChange(line.key, {
+                            taxCodeId: null,
+                            taxCodeCode: "",
+                            taxCodeName: "",
+                          });
+                          return;
+                        }
+                        onChange(line.key, {
+                          taxCodeId: Number(o.value),
+                          taxCodeCode: o.label.split(" — ")[0] ?? "",
+                          taxCodeName: o.label.split(" — ")[1] ?? "",
+                        });
+                      }}
+                      placeholder={taxLoading ? "Loading…" : "Code or desc"}
+                      ariaLabel={`HQ Tax line ${i + 1}`}
+                    />
+                    {lineHasError(line, "taxCodeId") && (
+                      <FieldError text={lineHasError(line, "taxCodeId")!} />
+                    )}
+                  </td>
+
+                  {/* Order No. / Tariff */}
+                  <td className="px-2 py-1.5">
+                    <SearchableSelect
+                      compact
+                      popoverPortal
+                      options={tariffOptions}
+                      loading={tariffLoading}
+                      value={line.tariffCodeId != null ? String(line.tariffCodeId) : null}
+                      selectedLabel={tariffLabel}
+                      onChange={(o) => {
+                        if (!o) {
+                          onChange(line.key, {
+                            tariffCodeId: null,
+                            tariffCodeCode: "",
+                            tariffCodeName: "",
+                          });
+                          return;
+                        }
+                        onChange(line.key, {
+                          tariffCodeId: Number(o.value),
+                          tariffCodeCode: o.label.split(" — ")[0] ?? "",
+                          tariffCodeName: o.label.split(" — ")[1] ?? "",
+                        });
+                      }}
+                      placeholder={tariffLoading ? "Loading…" : "Code or desc"}
+                      ariaLabel={`Order No line ${i + 1}`}
+                    />
+                    {lineHasError(line, "tariffCodeId") && (
+                      <FieldError text={lineHasError(line, "tariffCodeId")!} />
+                    )}
+                  </td>
+
+                  {/* Qty */}
+                  <td className="px-2 py-1.5">
+                    <input
+                      className="app-input h-8 px-2 py-1 text-[13px] tabular text-right"
+                      inputMode="decimal"
+                      value={line.qty}
+                      onChange={(e) => onChange(line.key, { qty: e.target.value })}
+                      aria-label={`Qty line ${i + 1}`}
+                    />
+                    {lineHasError(line, "qty") && (
+                      <FieldError text={lineHasError(line, "qty")!} />
+                    )}
+                  </td>
+
+                  {/* Unit Price */}
+                  <td className="px-2 py-1.5">
+                    <input
+                      className="app-input h-8 px-2 py-1 text-[13px] tabular text-right"
+                      inputMode="decimal"
+                      value={line.unitPrice}
+                      onChange={(e) => onChange(line.key, { unitPrice: e.target.value })}
+                      aria-label={`Unit Price line ${i + 1}`}
+                    />
+                    {lineHasError(line, "unitPrice") && (
+                      <FieldError text={lineHasError(line, "unitPrice")!} />
+                    )}
+                  </td>
+
+                  {/* Net (read-only) */}
+                  <td className="px-2 py-1.5">
+                    <input
+                      readOnly
+                      tabIndex={-1}
+                      className="app-input h-8 px-2 py-1 text-[13px] tabular text-right bg-muted"
+                      value={formatMoney(net)}
+                    />
+                  </td>
+
+                  {/* Ref No. */}
+                  <td className="px-2 py-1.5">
+                    <input
+                      className="app-input h-8 px-2 py-1 text-[13px]"
+                      value={line.refNo}
+                      onChange={(e) => onChange(line.key, { refNo: e.target.value })}
+                      aria-label={`Ref No line ${i + 1}`}
+                    />
+                  </td>
+
                   <td className="px-2 py-1.5 text-right">
                     <button
                       type="button"
@@ -733,13 +1246,13 @@ function DetailGrid({
           <tfoot>
             <tr className="border-t-2 border-border-strong bg-surface-2">
               <td
-                colSpan={COLS.length - 1}
+                colSpan={10}
                 className="px-2 py-2 text-right text-xs font-semibold uppercase text-muted-foreground"
               >
                 Line subtotal (MYR)
               </td>
               <td className="px-2 py-2 text-right tabular font-semibold">
-                {totalNet.toFixed(2)}
+                {formatMoney(totalNet)}
               </td>
               <td colSpan={2}></td>
             </tr>
@@ -747,5 +1260,13 @@ function DetailGrid({
         </table>
       </div>
     </div>
+  );
+}
+
+function FieldError({ text }: { text: string }) {
+  return (
+    <p className="mt-0.5 text-[10px] font-medium text-destructive" role="alert">
+      {text}
+    </p>
   );
 }
