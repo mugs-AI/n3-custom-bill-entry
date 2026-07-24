@@ -138,7 +138,9 @@ export function coerceDraft(raw: unknown): BillDraft | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   if (r.schemaVersion !== DRAFT_SCHEMA_VERSION) return null;
-  const lines = Array.isArray(r.lines) ? r.lines.map(coerceLine).filter((x): x is DraftLine => !!x) : [];
+  const lines = Array.isArray(r.lines)
+    ? r.lines.map(coerceLine).filter((x): x is DraftLine => !!x)
+    : [];
   if (lines.length === 0) return null;
   return {
     schemaVersion: DRAFT_SCHEMA_VERSION,

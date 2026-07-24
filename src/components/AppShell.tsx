@@ -21,9 +21,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </span>
             <div className="leading-tight">
               <div className="text-sm font-semibold">Custom Bill Entry</div>
-              <div className="text-[11px] text-muted-foreground">
-                N3 AI Cloud Accounting
-              </div>
+              <div className="text-[11px] text-muted-foreground">N3 AI Cloud Accounting</div>
             </div>
           </Link>
           <nav className="ml-4 flex items-center gap-1 text-sm">
@@ -44,7 +42,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             {token ? (
               <button
                 onClick={() => {
-                  if (confirm("Sign out of N3?")) { clearAllDrafts(); clearToken(); }
+                  if (confirm("Sign out of N3?")) {
+                    clearAllDrafts();
+                    clearToken();
+                  }
                 }}
                 className="app-btn"
               >

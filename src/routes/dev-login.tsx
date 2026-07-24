@@ -9,8 +9,7 @@ export const Route = createFileRoute("/dev-login")({
       { title: "Dev connect · Custom Bill Entry" },
       {
         name: "description",
-        content:
-          "Development-only sign-in for N3 Open API. Not available in production.",
+        content: "Development-only sign-in for N3 Open API. Not available in production.",
       },
       { name: "robots", content: "noindex" },
     ],
@@ -73,10 +72,9 @@ function DevLogin() {
           </div>
           <h1 className="text-xl font-semibold">Connect to N3 (dev)</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Paste an N3 API key from <em>My Apps → New App</em>. The server
-            exchanges it for a JWT and stores the token in your browser so you
-            stay signed in across reloads. This screen is disabled in
-            production; production users launch the app from N3 My Apps with
+            Paste an N3 API key from <em>My Apps → New App</em>. The server exchanges it for a JWT
+            and stores the token in your browser so you stay signed in across reloads. This screen
+            is disabled in production; production users launch the app from N3 My Apps with
             <code className="mx-1 rounded bg-muted px-1">?token=…</code>.
           </p>
           {!isDev && (

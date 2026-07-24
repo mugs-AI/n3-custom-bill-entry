@@ -11,12 +11,7 @@ import { n3Call, n3ListAll, N3Error } from "@/lib/n3-client";
 import { todayISOInKL } from "@/lib/date-my";
 import { formatMoney, multiplyDecimal, sumTo2dp } from "@/lib/money";
 import { useItemLayout } from "@/hooks/use-item-layout";
-import {
-  FIELD_LABELS,
-  READONLY_FIELDS,
-  type FieldId,
-  type ItemLayout,
-} from "@/lib/item-layout";
+import { FIELD_LABELS, READONLY_FIELDS, type FieldId, type ItemLayout } from "@/lib/item-layout";
 import {
   clearDraft,
   draftStorageKey,
@@ -71,8 +66,17 @@ interface SupplierDetail extends SupplierList {
   termId?: number;
   term?: { id?: number; code?: string; description?: string } | null;
 }
-interface Purchaser { id: number; code?: string; name?: string; isActive?: boolean }
-interface Term { id: number; code?: string; description?: string }
+interface Purchaser {
+  id: number;
+  code?: string;
+  name?: string;
+  isActive?: boolean;
+}
+interface Term {
+  id: number;
+  code?: string;
+  description?: string;
+}
 interface StockListRow {
   id: number;
   code?: string;
@@ -89,8 +93,18 @@ interface StockDetail {
   description?: string;
   uoms?: Array<{ id: number; code?: string; isBase?: boolean; rate?: number }>;
 }
-interface AccountCode { id: string; code?: string; name?: string; isActive?: boolean }
-interface Project { id: number; code?: string; name?: string; isActive?: boolean }
+interface AccountCode {
+  id: string;
+  code?: string;
+  name?: string;
+  isActive?: boolean;
+}
+interface Project {
+  id: number;
+  code?: string;
+  name?: string;
+  isActive?: boolean;
+}
 interface TaxCode {
   id: number;
   code?: string;
@@ -99,7 +113,12 @@ interface TaxCode {
   isActive?: boolean;
   inactive?: boolean;
 }
-interface TariffCode { id: number; code?: string; description?: string; isActive?: boolean }
+interface TariffCode {
+  id: number;
+  code?: string;
+  description?: string;
+  isActive?: boolean;
+}
 
 interface DetailLine {
   key: string;
@@ -161,7 +180,10 @@ function NewBillEntry() {
   const [capturePhase, setCapturePhase] = useState<"pending" | "done">("pending");
 
   useEffect(() => {
-    if (typeof window === "undefined") { setCapturePhase("done"); return; }
+    if (typeof window === "undefined") {
+      setCapturePhase("done");
+      return;
+    }
     try {
       const url = new URL(window.location.href);
       const t = url.searchParams.get("token");
@@ -170,7 +192,9 @@ function NewBillEntry() {
         url.searchParams.delete("token");
         window.history.replaceState({}, "", url.toString());
       }
-    } catch { /* fail-safe */ }
+    } catch {
+      /* fail-safe */
+    }
     setCapturePhase("done");
   }, []);
 
@@ -202,14 +226,15 @@ function NoAuthPanel() {
     <div className="app-card mx-auto max-w-lg p-6">
       <h1 className="text-lg font-semibold">Not connected to N3</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        This app must be launched from <strong>N3 My Apps</strong> so the JWT
-        arrives on the URL as <code>?token=…</code>. It is then stored in your
-        browser and reused across reloads.
+        This app must be launched from <strong>N3 My Apps</strong> so the JWT arrives on the URL as{" "}
+        <code>?token=…</code>. It is then stored in your browser and reused across reloads.
       </p>
       {isDev && (
         <p className="mt-3 text-sm text-muted-foreground">
           For local development, use the{" "}
-          <a href="/dev-login" className="text-primary underline">dev connect</a>{" "}
+          <a href="/dev-login" className="text-primary underline">
+            dev connect
+          </a>{" "}
           screen to exchange an API key.
         </p>
       )}
@@ -290,49 +315,64 @@ function BillForm() {
 
   const suppliersQ = useQuery({
     queryKey: ["n3", "suppliers"],
-    queryFn: ({ signal }) => n3ListAll<SupplierList>("api/Suppliers/List", { pageSize: 500, signal }),
-    staleTime: 60_000, retry: noRetryOn401,
+    queryFn: ({ signal }) =>
+      n3ListAll<SupplierList>("api/Suppliers/List", { pageSize: 500, signal }),
+    staleTime: 60_000,
+    retry: noRetryOn401,
   });
   const purchasersQ = useQuery({
     queryKey: ["n3", "purchasers"],
-    queryFn: ({ signal }) => n3ListAll<Purchaser>("api/Purchasers/Query", { pageSize: 500, signal }),
-    staleTime: 60_000, retry: noRetryOn401,
+    queryFn: ({ signal }) =>
+      n3ListAll<Purchaser>("api/Purchasers/Query", { pageSize: 500, signal }),
+    staleTime: 60_000,
+    retry: noRetryOn401,
   });
   const termsQ = useQuery({
     queryKey: ["n3", "terms"],
     queryFn: ({ signal }) => n3ListAll<Term>("api/Terms/Query", { pageSize: 500, signal }),
-    staleTime: 5 * 60_000, retry: noRetryOn401,
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
   });
   const stocksQ = useQuery({
     queryKey: ["n3", "stocks"],
     queryFn: ({ signal }) => n3ListAll<StockListRow>("api/Stocks/List", { pageSize: 500, signal }),
-    staleTime: 5 * 60_000, retry: noRetryOn401,
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
   });
   const glAccountsQ = useQuery({
     queryKey: ["n3", "glAccounts"],
-    queryFn: ({ signal }) => n3ListAll<AccountCode>("api/AccountCodes/Leaf/Query", { pageSize: 500, signal }),
-    staleTime: 5 * 60_000, retry: noRetryOn401,
+    queryFn: ({ signal }) =>
+      n3ListAll<AccountCode>("api/AccountCodes/Leaf/Query", { pageSize: 500, signal }),
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
   });
   const projectsQ = useQuery({
     queryKey: ["n3", "projects"],
     queryFn: ({ signal }) => n3ListAll<Project>("api/Projects/Query", { pageSize: 500, signal }),
-    staleTime: 5 * 60_000, retry: noRetryOn401,
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
   });
   const taxCodesQ = useQuery({
     queryKey: ["n3", "taxCodes"],
-    queryFn: ({ signal }) => n3ListAll<TaxCode>("api/TaxCodes/InputTax/Query", { pageSize: 500, signal }),
-    staleTime: 5 * 60_000, retry: noRetryOn401,
+    queryFn: ({ signal }) =>
+      n3ListAll<TaxCode>("api/TaxCodes/InputTax/Query", { pageSize: 500, signal }),
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
   });
   const tariffCodesQ = useQuery({
     queryKey: ["n3", "tariffCodes"],
-    queryFn: ({ signal }) => n3ListAll<TariffCode>("api/TariffCodes/Query", { pageSize: 500, signal }),
-    staleTime: 5 * 60_000, retry: noRetryOn401,
+    queryFn: ({ signal }) =>
+      n3ListAll<TariffCode>("api/TariffCodes/Query", { pageSize: 500, signal }),
+    staleTime: 5 * 60_000,
+    retry: noRetryOn401,
   });
 
   const supplierDetailQ = useQuery({
     queryKey: ["n3", "supplier", supplierId],
     queryFn: ({ signal }) => n3Call<SupplierDetail>(`api/Suppliers/${supplierId}`, { signal }),
-    enabled: supplierId != null, staleTime: 30_000, retry: noRetryOn401,
+    enabled: supplierId != null,
+    staleTime: 30_000,
+    retry: noRetryOn401,
   });
 
   useEffect(() => {
@@ -344,7 +384,10 @@ function BillForm() {
   }, [supplierDetailQ.data, termTouched]);
 
   useEffect(() => {
-    if (supplierId == null) { setSupplierLabelDraft(""); setTermTouched(false); }
+    if (supplierId == null) {
+      setSupplierLabelDraft("");
+      setTermTouched(false);
+    }
   }, [supplierId]);
 
   const collator = useMemo(
@@ -353,10 +396,12 @@ function BillForm() {
   );
 
   const dedupe = useCallback(<T extends { id: string | number }>(rows: T[]): T[] => {
-    const seen = new Set<string | number>(); const out: T[] = [];
+    const seen = new Set<string | number>();
+    const out: T[] = [];
     for (const r of rows) {
       if (r?.id == null || seen.has(r.id)) continue;
-      seen.add(r.id); out.push(r);
+      seen.add(r.id);
+      out.push(r);
     }
     return out;
   }, []);
@@ -364,7 +409,8 @@ function BillForm() {
   const supplierOptions: ComboOption[] = useMemo(() => {
     const rows = dedupe(suppliersQ.data ?? []).slice();
     rows.sort((a, b) => {
-      const an = (a.name ?? "").trim(), bn = (b.name ?? "").trim();
+      const an = (a.name ?? "").trim(),
+        bn = (b.name ?? "").trim();
       if (!an && bn) return 1;
       if (an && !bn) return -1;
       const byName = collator.compare(an, bn);
@@ -378,17 +424,19 @@ function BillForm() {
   }, [suppliersQ.data, collator, dedupe]);
 
   const purchaserOptions: ComboOption[] = useMemo(
-    () => dedupe(purchasersQ.data ?? [])
-      .filter((p) => p.isActive !== false)
-      .map((p) => ({ value: String(p.id), label: `${p.code ?? ""} — ${p.name ?? ""}`.trim() })),
+    () =>
+      dedupe(purchasersQ.data ?? [])
+        .filter((p) => p.isActive !== false)
+        .map((p) => ({ value: String(p.id), label: `${p.code ?? ""} — ${p.name ?? ""}`.trim() })),
     [purchasersQ.data, dedupe],
   );
 
   const termOptions: ComboOption[] = useMemo(
-    () => dedupe(termsQ.data ?? []).map((t) => ({
-      value: String(t.id),
-      label: `${t.code ?? ""} — ${t.description ?? ""}`.trim(),
-    })),
+    () =>
+      dedupe(termsQ.data ?? []).map((t) => ({
+        value: String(t.id),
+        label: `${t.code ?? ""} — ${t.description ?? ""}`.trim(),
+      })),
     [termsQ.data, dedupe],
   );
 
@@ -416,19 +464,28 @@ function BillForm() {
 
   const projectOptions: ComboOption[] = useMemo(() => {
     const rows = sortByCode(dedupe(projectsQ.data ?? []).filter((r) => r.isActive !== false));
-    return rows.map((r) => ({ value: String(r.id), label: `${r.code ?? ""} — ${r.name ?? ""}`.trim() }));
+    return rows.map((r) => ({
+      value: String(r.id),
+      label: `${r.code ?? ""} — ${r.name ?? ""}`.trim(),
+    }));
   }, [projectsQ.data, sortByCode, dedupe]);
 
   const taxOptions: ComboOption[] = useMemo(() => {
     const rows = sortByCode(
       dedupe(taxCodesQ.data ?? []).filter((r) => r.isActive !== false && r.inactive !== true),
     );
-    return rows.map((r) => ({ value: String(r.id), label: `${r.code ?? ""} — ${r.fullName ?? ""}`.trim() }));
+    return rows.map((r) => ({
+      value: String(r.id),
+      label: `${r.code ?? ""} — ${r.fullName ?? ""}`.trim(),
+    }));
   }, [taxCodesQ.data, sortByCode, dedupe]);
 
   const tariffOptions: ComboOption[] = useMemo(() => {
     const rows = sortByCode(dedupe(tariffCodesQ.data ?? []).filter((r) => r.isActive !== false));
-    return rows.map((r) => ({ value: String(r.id), label: `${r.code ?? ""} — ${r.description ?? ""}`.trim() }));
+    return rows.map((r) => ({
+      value: String(r.id),
+      label: `${r.code ?? ""} — ${r.description ?? ""}`.trim(),
+    }));
   }, [tariffCodesQ.data, sortByCode, dedupe]);
 
   const listSupplier = useMemo<SupplierList | null>(() => {
@@ -439,8 +496,14 @@ function BillForm() {
   const detail: SupplierDetail | null =
     supplierDetailQ.data && supplierDetailQ.data.id === supplierId ? supplierDetailQ.data : null;
   const supplierView = detail ?? listSupplier;
-  const addressLines = [supplierView?.address1, supplierView?.address2, supplierView?.address3, supplierView?.address4]
-    .map((s) => (s ?? "").trim()).filter((s) => s.length > 0);
+  const addressLines = [
+    supplierView?.address1,
+    supplierView?.address2,
+    supplierView?.address3,
+    supplierView?.address4,
+  ]
+    .map((s) => (s ?? "").trim())
+    .filter((s) => s.length > 0);
   const email = pickEmail(detail) || (listSupplier?.email ?? "");
   const phone = supplierView?.phoneNo1 ?? "";
   const contact = supplierView?.contactPerson ?? "";
@@ -489,9 +552,14 @@ function BillForm() {
     async (line: DetailLine, opt: ComboOption | null) => {
       if (!opt) {
         updateLine(line.key, {
-          stockId: null, stockCode: "", stockName: "",
-          itemDescription: "", itemDescriptionTouched: false,
-          uomId: null, uomCode: "", uomError: null,
+          stockId: null,
+          stockCode: "",
+          stockName: "",
+          itemDescription: "",
+          itemDescriptionTouched: false,
+          uomId: null,
+          uomCode: "",
+          uomError: null,
         });
         return;
       }
@@ -519,7 +587,8 @@ function BillForm() {
       } catch (err) {
         if (err instanceof N3Error && err.status === 401) return;
         updateLine(line.key, {
-          uomError: err instanceof Error ? `UOM lookup failed: ${err.message}` : "UOM lookup failed",
+          uomError:
+            err instanceof Error ? `UOM lookup failed: ${err.message}` : "UOM lookup failed",
         });
       }
     },
@@ -533,7 +602,9 @@ function BillForm() {
     }
     const row = glById.get(opt.value);
     updateLine(line.key, {
-      glAccountId: opt.value, glAccountCode: row?.code ?? "", glAccountName: row?.name ?? "",
+      glAccountId: opt.value,
+      glAccountCode: row?.code ?? "",
+      glAccountName: row?.name ?? "",
     });
   };
 
@@ -556,38 +627,52 @@ function BillForm() {
       referenceNo: refNo,
       supplierInvNo,
       isTaxInclusive,
-      lines: lines.map((l): DraftLine => ({
-        key: l.key,
-        stockId: l.stockId,
-        stockCode: l.stockCode,
-        stockName: l.stockName,
-        itemDescription: l.itemDescription,
-        itemDescriptionTouched: l.itemDescriptionTouched,
-        uomId: l.uomId,
-        uomCode: l.uomCode,
-        glAccountId: l.glAccountId,
-        glAccountCode: l.glAccountCode,
-        glAccountName: l.glAccountName,
-        projectId: l.projectId,
-        projectCode: l.projectCode,
-        projectName: l.projectName,
-        taxCodeId: l.taxCodeId,
-        taxCodeCode: l.taxCodeCode,
-        taxCodeName: l.taxCodeName,
-        tariffCodeId: l.tariffCodeId,
-        tariffCodeCode: l.tariffCodeCode,
-        tariffCodeName: l.tariffCodeName,
-        qty: l.qty,
-        unitPrice: l.unitPrice,
-        refNo: l.refNo,
-      })),
+      lines: lines.map(
+        (l): DraftLine => ({
+          key: l.key,
+          stockId: l.stockId,
+          stockCode: l.stockCode,
+          stockName: l.stockName,
+          itemDescription: l.itemDescription,
+          itemDescriptionTouched: l.itemDescriptionTouched,
+          uomId: l.uomId,
+          uomCode: l.uomCode,
+          glAccountId: l.glAccountId,
+          glAccountCode: l.glAccountCode,
+          glAccountName: l.glAccountName,
+          projectId: l.projectId,
+          projectCode: l.projectCode,
+          projectName: l.projectName,
+          taxCodeId: l.taxCodeId,
+          taxCodeCode: l.taxCodeCode,
+          taxCodeName: l.taxCodeName,
+          tariffCodeId: l.tariffCodeId,
+          tariffCodeCode: l.tariffCodeCode,
+          tariffCodeName: l.tariffCodeName,
+          qty: l.qty,
+          unitPrice: l.unitPrice,
+          refNo: l.refNo,
+        }),
+      ),
     };
     saveDraft(draft);
   }, [
-    docDate, supplierId, supplierLabel, supplierLabelDraft,
-    purchaserId, purchaserLabel, purchaserLabelDraft,
-    termId, termLabel, termLabelDraft, termTouched,
-    description, refNo, supplierInvNo, isTaxInclusive, lines,
+    docDate,
+    supplierId,
+    supplierLabel,
+    supplierLabelDraft,
+    purchaserId,
+    purchaserLabel,
+    purchaserLabelDraft,
+    termId,
+    termLabel,
+    termLabelDraft,
+    termTouched,
+    description,
+    refNo,
+    supplierInvNo,
+    isTaxInclusive,
+    lines,
     save.status,
   ]);
 
@@ -599,7 +684,9 @@ function BillForm() {
       if (now !== draftScopeAtMount.current) {
         try {
           window.sessionStorage.removeItem(draftScopeAtMount.current);
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
         draftScopeAtMount.current = now;
       }
     };
@@ -614,10 +701,16 @@ function BillForm() {
   const resetForm = useCallback(() => {
     clearDraft();
     setDocDate(todayISOInKL());
-    setSupplierId(null); setSupplierLabelDraft("");
-    setPurchaserId(null); setPurchaserLabelDraft("");
-    setTermId(null); setTermLabelDraft(""); setTermTouched(false);
-    setDescription(""); setRefNo(""); setSupplierInvNo("");
+    setSupplierId(null);
+    setSupplierLabelDraft("");
+    setPurchaserId(null);
+    setPurchaserLabelDraft("");
+    setTermId(null);
+    setTermLabelDraft("");
+    setTermTouched(false);
+    setDescription("");
+    setRefNo("");
+    setSupplierInvNo("");
     setIsTaxInclusive(false);
     setLines([emptyLine()]);
     setSave({ status: "idle" });
@@ -630,14 +723,29 @@ function BillForm() {
   // ==================== Save to N3 =========================================
   const savingRef = useRef(false);
   const canSave =
-    !suppliersQ.isLoading && !termsQ.isLoading && !stocksQ.isLoading &&
-    !glAccountsQ.isLoading && !projectsQ.isLoading && !taxCodesQ.isLoading &&
-    !tariffCodesQ.isLoading && !suppliersQ.isError && !termsQ.isError &&
-    supplierId != null && termId != null && supplierInvNo.trim().length > 0 &&
-    lines.some((l) =>
-      l.stockId != null && l.uomId != null && l.glAccountId != null &&
-      l.projectId != null && l.taxCodeId != null && l.tariffCodeId != null &&
-      Number(l.qty) > 0 && Number(l.unitPrice) >= 0 && l.itemDescription.trim().length > 0,
+    !suppliersQ.isLoading &&
+    !termsQ.isLoading &&
+    !stocksQ.isLoading &&
+    !glAccountsQ.isLoading &&
+    !projectsQ.isLoading &&
+    !taxCodesQ.isLoading &&
+    !tariffCodesQ.isLoading &&
+    !suppliersQ.isError &&
+    !termsQ.isError &&
+    supplierId != null &&
+    termId != null &&
+    supplierInvNo.trim().length > 0 &&
+    lines.some(
+      (l) =>
+        l.stockId != null &&
+        l.uomId != null &&
+        l.glAccountId != null &&
+        l.projectId != null &&
+        l.taxCodeId != null &&
+        l.tariffCodeId != null &&
+        Number(l.qty) > 0 &&
+        Number(l.unitPrice) >= 0 &&
+        l.itemDescription.trim().length > 0,
     ) &&
     save.status !== "saving";
 
@@ -683,7 +791,10 @@ function BillForm() {
       });
       const data: unknown = await res.json().catch(() => null);
       const d = (data ?? {}) as {
-        ok?: boolean; docCode?: string; error?: string; kind?: string;
+        ok?: boolean;
+        docCode?: string;
+        error?: string;
+        kind?: string;
       };
       if (res.ok && d.ok && d.docCode) {
         clearDraft();
@@ -697,9 +808,10 @@ function BillForm() {
     } catch (err) {
       setSave({
         status: "error",
-        message: err instanceof Error
-          ? `Network error: ${err.message}. If unsure, verify in N3 before retrying.`
-          : "Network error.",
+        message:
+          err instanceof Error
+            ? `Network error: ${err.message}. If unsure, verify in N3 before retrying.`
+            : "Network error.",
       });
     } finally {
       savingRef.current = false;
@@ -707,9 +819,7 @@ function BillForm() {
   };
 
   if (save.status === "success" && save.docCode) {
-    return (
-      <SuccessPanel docCode={save.docCode} onNew={resetForm} />
-    );
+    return <SuccessPanel docCode={save.docCode} onNew={resetForm} />;
   }
 
   return (
@@ -731,7 +841,12 @@ function BillForm() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" className="app-btn" onClick={onReset} disabled={save.status === "saving"}>
+          <button
+            type="button"
+            className="app-btn"
+            onClick={onReset}
+            disabled={save.status === "saving"}
+          >
             Reset
           </button>
           <button
@@ -739,7 +854,9 @@ function BillForm() {
             disabled={!canSave}
             onClick={onSave}
             className="app-btn app-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-            title={canSave ? "Post the Purchase Invoice to N3" : "Fill required fields before saving"}
+            title={
+              canSave ? "Post the Purchase Invoice to N3" : "Fill required fields before saving"
+            }
           >
             {save.status === "saving" ? "Saving to N3…" : "Save to N3"}
           </button>
@@ -747,9 +864,16 @@ function BillForm() {
       </div>
 
       {save.status === "error" && save.message && (
-        <div className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
-          <div><strong>Save failed:</strong> {save.message}</div>
-          <button type="button" className="app-btn" onClick={() => setSave({ status: "idle" })}>Dismiss</button>
+        <div
+          className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          role="alert"
+        >
+          <div>
+            <strong>Save failed:</strong> {save.message}
+          </div>
+          <button type="button" className="app-btn" onClick={() => setSave({ status: "idle" })}>
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -768,11 +892,23 @@ function BillForm() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div>
             <label className="app-label">Purchase Invoice No.</label>
-            <input className="app-input bg-muted text-muted-foreground" readOnly value="Assigned on save" />
+            <input
+              className="app-input bg-muted text-muted-foreground"
+              readOnly
+              value="Assigned on save"
+            />
           </div>
           <div>
-            <label className="app-label" htmlFor="doc-date">Document Date</label>
-            <MyDateInput id="doc-date" value={docDate} onChange={setDocDate} ariaLabel="Document Date" required />
+            <label className="app-label" htmlFor="doc-date">
+              Document Date
+            </label>
+            <MyDateInput
+              id="doc-date"
+              value={docDate}
+              onChange={setDocDate}
+              ariaLabel="Document Date"
+              required
+            />
           </div>
           <div>
             <label className="app-label">Supplier</label>
@@ -813,14 +949,20 @@ function BillForm() {
                 setPurchaserLabelDraft(o?.label ?? "");
               }}
               loading={purchasersQ.isLoading}
-              placeholder={purchasersQ.isLoading ? "Loading purchasers…" : "Blank — select if needed"}
+              placeholder={
+                purchasersQ.isLoading ? "Loading purchasers…" : "Blank — select if needed"
+              }
               ariaLabel="Purchaser"
             />
           </div>
 
           <div className="md:col-span-2">
             <label className="app-label">Supplier Address</label>
-            <div className="app-input min-h-[76px] whitespace-pre-line py-2" role="group" aria-label="Supplier Address">
+            <div
+              className="app-input min-h-[76px] whitespace-pre-line py-2"
+              role="group"
+              aria-label="Supplier Address"
+            >
               {addressLines.length ? addressLines.join("\n") : ""}
             </div>
           </div>
@@ -838,7 +980,9 @@ function BillForm() {
             <input className="app-input" readOnly value={email} />
           </div>
           <div>
-            <label className="app-label">Term <span className="text-destructive">*</span></label>
+            <label className="app-label">
+              Term <span className="text-destructive">*</span>
+            </label>
             <SearchableSelect
               options={termOptions}
               value={termId != null ? String(termId) : null}
@@ -849,26 +993,48 @@ function BillForm() {
                 setTermLabelDraft(o?.label ?? "");
               }}
               loading={termsQ.isLoading}
-              placeholder={termsQ.isLoading ? "Loading terms…" : supplierId ? "Default from supplier" : "Select a term"}
+              placeholder={
+                termsQ.isLoading
+                  ? "Loading terms…"
+                  : supplierId
+                    ? "Default from supplier"
+                    : "Select a term"
+              }
               ariaLabel="Term"
             />
           </div>
 
           <div>
             <label className="app-label">HQ Sequence</label>
-            <input className="app-input" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Free text (→ Description)" />
+            <input
+              className="app-input"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Free text (→ Description)"
+            />
           </div>
           <div>
             <label className="app-label">Reference No.</label>
             <input className="app-input" value={refNo} onChange={(e) => setRefNo(e.target.value)} />
           </div>
           <div>
-            <label className="app-label">Supplier INV# <span className="text-destructive">*</span></label>
-            <input required className="app-input" value={supplierInvNo} onChange={(e) => setSupplierInvNo(e.target.value)} placeholder="Duplicate check runs on save" />
+            <label className="app-label">
+              Supplier INV# <span className="text-destructive">*</span>
+            </label>
+            <input
+              required
+              className="app-input"
+              value={supplierInvNo}
+              onChange={(e) => setSupplierInvNo(e.target.value)}
+              placeholder="Duplicate check runs on save"
+            />
           </div>
 
           <div className="md:col-span-3 mt-1 flex items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-2">
-            <label className="inline-flex cursor-pointer select-none items-center gap-2" htmlFor="tax-inclusive">
+            <label
+              className="inline-flex cursor-pointer select-none items-center gap-2"
+              htmlFor="tax-inclusive"
+            >
               <input
                 id="tax-inclusive"
                 type="checkbox"
@@ -922,13 +1088,14 @@ function BillForm() {
 function SuccessPanel({ docCode, onNew }: { docCode: string; onNew: () => void }) {
   return (
     <div className="app-card mx-auto max-w-xl p-6 text-center">
-      <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-success/10 text-success" aria-hidden>
+      <div
+        className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-success/10 text-success"
+        aria-hidden
+      >
         ✓
       </div>
       <h1 className="text-lg font-semibold">Purchase Invoice created in N3</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        N3 assigned document number
-      </p>
+      <p className="mt-2 text-sm text-muted-foreground">N3 assigned document number</p>
       <p className="mt-1 text-2xl font-semibold tabular tracking-tight">{docCode}</p>
       <div className="mt-5 flex items-center justify-center gap-2">
         <button type="button" className="app-btn app-btn-primary" onClick={onNew}>
@@ -942,13 +1109,15 @@ function SuccessPanel({ docCode, onNew }: { docCode: string; onNew: () => void }
 function pickEmail(detail: SupplierDetail | null): string {
   if (!detail) return "";
   const candidates: unknown[] = [
-    detail.email, detail.eInvoiceEmail,
+    detail.email,
+    detail.eInvoiceEmail,
     ...(Array.isArray(detail.emailList) ? detail.emailList : []),
   ];
   for (const c of candidates) {
     if (typeof c === "string" && c.trim()) return c.trim();
     if (c && typeof c === "object") {
-      const v = (c as { value?: unknown; email?: unknown }).value ?? (c as { email?: unknown }).email;
+      const v =
+        (c as { value?: unknown; email?: unknown }).value ?? (c as { email?: unknown }).email;
       if (typeof v === "string" && v.trim()) return v.trim();
     }
   }
@@ -956,18 +1125,24 @@ function pickEmail(detail: SupplierDetail | null): string {
 }
 
 function ErrorBanner({
-  label, query,
+  label,
+  query,
 }: {
   label: string;
   query: { error: unknown; isError: boolean; refetch: () => void };
 }) {
   if (!query.isError) return null;
   const err = query.error;
-  const msg = err instanceof N3Error ? err.message : err instanceof Error ? err.message : "Request failed";
+  const msg =
+    err instanceof N3Error ? err.message : err instanceof Error ? err.message : "Request failed";
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-      <span><strong>{label}:</strong> {msg}</span>
-      <button type="button" className="app-btn" onClick={() => query.refetch()}>Retry</button>
+      <span>
+        <strong>{label}:</strong> {msg}
+      </span>
+      <button type="button" className="app-btn" onClick={() => query.refetch()}>
+        Retry
+      </button>
     </div>
   );
 }
@@ -975,11 +1150,16 @@ function ErrorBanner({
 // ============================== Line list ==============================
 
 interface LineCtx {
-  stockOptions: ComboOption[]; stocksLoading: boolean;
-  glOptions: ComboOption[]; glLoading: boolean;
-  projectOptions: ComboOption[]; projectsLoading: boolean;
-  taxOptions: ComboOption[]; taxLoading: boolean;
-  tariffOptions: ComboOption[]; tariffLoading: boolean;
+  stockOptions: ComboOption[];
+  stocksLoading: boolean;
+  glOptions: ComboOption[];
+  glLoading: boolean;
+  projectOptions: ComboOption[];
+  projectsLoading: boolean;
+  taxOptions: ComboOption[];
+  taxLoading: boolean;
+  tariffOptions: ComboOption[];
+  tariffLoading: boolean;
   tariffHasError: boolean;
   onStockSelect: (line: DetailLine, opt: ComboOption | null) => void;
   onGlSelect: (line: DetailLine, opt: ComboOption | null) => void;
@@ -988,11 +1168,18 @@ interface LineCtx {
 }
 
 function LineList({
-  lines, layout, onAdd, onRemove, totalNet,
+  lines,
+  layout,
+  onAdd,
+  onRemove,
+  totalNet,
   ...ctx
 }: LineCtx & {
-  lines: DetailLine[]; layout: ItemLayout;
-  onAdd: () => void; onRemove: (key: string) => void; totalNet: number;
+  lines: DetailLine[];
+  layout: ItemLayout;
+  onAdd: () => void;
+  onRemove: (key: string) => void;
+  totalNet: number;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
 
@@ -1038,10 +1225,16 @@ function LineList({
         <div>
           <h2 className="text-sm font-semibold">Invoice Lines</h2>
           <p className="text-[11px] text-muted-foreground">
-            Two-row card · configure fields in <a className="underline" href="/settings">Settings</a> · Enter advances field / creates line · Net = Qty × Unit Price
+            Two-row card · configure fields in{" "}
+            <a className="underline" href="/settings">
+              Settings
+            </a>{" "}
+            · Enter advances field / creates line · Net = Qty × Unit Price
           </p>
         </div>
-        <button type="button" className="app-btn" onClick={onAdd}>+ Add line</button>
+        <button type="button" className="app-btn" onClick={onAdd}>
+          + Add line
+        </button>
       </div>
 
       <div ref={gridRef} onKeyDown={handleGridKey} className="space-y-3 p-3">
@@ -1069,50 +1262,58 @@ function LineList({
 }
 
 function LineCard({
-  line, index, layout, onRemove, canRemove, ...ctx
+  line,
+  index,
+  layout,
+  onRemove,
+  canRemove,
+  ...ctx
 }: LineCtx & {
-  line: DetailLine; index: number; layout: ItemLayout;
-  onRemove: () => void; canRemove: boolean;
+  line: DetailLine;
+  index: number;
+  layout: ItemLayout;
+  onRemove: () => void;
+  canRemove: boolean;
 }) {
   const anyFilled =
-    line.stockId != null || line.glAccountId != null || line.projectId != null ||
-    line.taxCodeId != null || line.tariffCodeId != null ||
-    line.qty.trim() !== "" || line.unitPrice.trim() !== "";
+    line.stockId != null ||
+    line.glAccountId != null ||
+    line.projectId != null ||
+    line.taxCodeId != null ||
+    line.tariffCodeId != null ||
+    line.qty.trim() !== "" ||
+    line.unitPrice.trim() !== "";
 
   const errorFor = (id: FieldId): string | null => {
     if (!anyFilled) return null;
     switch (id) {
-      case "wbs": return line.stockId == null ? "WBS required" : line.uomError;
-      case "glAccount": return line.glAccountId == null ? "GL required" : null;
-      case "costCentre": return line.projectId == null ? "Cost Centre required" : null;
-      case "hqTax": return line.taxCodeId == null ? "Tax required" : null;
-      case "orderNo": return line.tariffCodeId == null ? "Tariff required" : null;
-      case "qty": return Number(line.qty) > 0 ? null : "Qty > 0";
-      case "unitPrice": return Number(line.unitPrice) >= 0 ? null : "Price ≥ 0";
-      default: return null;
+      case "wbs":
+        return line.stockId == null ? "WBS required" : line.uomError;
+      case "glAccount":
+        return line.glAccountId == null ? "GL required" : null;
+      case "costCentre":
+        return line.projectId == null ? "Cost Centre required" : null;
+      case "hqTax":
+        return line.taxCodeId == null ? "Tax required" : null;
+      case "orderNo":
+        return line.tariffCodeId == null ? "Tariff required" : null;
+      case "qty":
+        return Number(line.qty) > 0 ? null : "Qty > 0";
+      case "unitPrice":
+        return Number(line.unitPrice) >= 0 ? null : "Price ≥ 0";
+      default:
+        return null;
     }
   };
 
   const renderField = (id: FieldId) => (
-    <FieldCell
-      key={id}
-      id={id}
-      line={line}
-      index={index}
-      error={errorFor(id)}
-      {...ctx}
-    />
+    <FieldCell key={id} id={id} line={line} index={index} error={errorFor(id)} {...ctx} />
   );
 
   return (
-    <div
-      data-line-row
-      className="grid-row-focus rounded-lg border border-border bg-surface"
-    >
+    <div data-line-row className="grid-row-focus rounded-lg border border-border bg-surface">
       <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">
-        <div className="text-xs font-semibold text-muted-foreground tabular">
-          Item {index + 1}
-        </div>
+        <div className="text-xs font-semibold text-muted-foreground tabular">Item {index + 1}</div>
         <button
           type="button"
           tabIndex={-1}
@@ -1132,18 +1333,16 @@ function LineCard({
   );
 }
 
-function RowRow({
-  ids, render,
-}: { ids: FieldId[]; render: (id: FieldId) => React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {ids.map((id) => render(id))}
-    </div>
-  );
+function RowRow({ ids, render }: { ids: FieldId[]; render: (id: FieldId) => React.ReactNode }) {
+  return <div className="flex flex-wrap gap-2">{ids.map((id) => render(id))}</div>;
 }
 
 function FieldCell({
-  id, line, index, error, ...ctx
+  id,
+  line,
+  index,
+  error,
+  ...ctx
 }: LineCtx & { id: FieldId; line: DetailLine; index: number; error: string | null }) {
   const readOnly = READONLY_FIELDS.has(id);
   const wideClass = "min-w-[220px] flex-[2_1_220px]";
@@ -1164,9 +1363,12 @@ function FieldCell({
 
   switch (id) {
     case "wbs":
-      return wrap(medClass, (
+      return wrap(
+        medClass,
         <SearchableSelect
-          compact popoverPortal withPopoverSearch
+          compact
+          popoverPortal
+          withPopoverSearch
           minPopoverWidth={750}
           options={ctx.stockOptions}
           loading={ctx.stocksLoading}
@@ -1175,47 +1377,61 @@ function FieldCell({
           onChange={(o) => ctx.onStockSelect(line, o)}
           placeholder={ctx.stocksLoading ? "Loading…" : "Select WBS"}
           ariaLabel={`WBS line ${index + 1}`}
-        />
-      ));
+        />,
+      );
     case "itemDescription":
-      return wrap(wideClass, (
+      return wrap(
+        wideClass,
         <input
           className="app-input h-8 px-2 py-1 text-[13px]"
           value={line.itemDescription}
-          onChange={(e) => onChange(line.key, {
-            itemDescription: e.target.value, itemDescriptionTouched: true,
-          })}
+          onChange={(e) =>
+            onChange(line.key, {
+              itemDescription: e.target.value,
+              itemDescriptionTouched: true,
+            })
+          }
           aria-label={`Item Description line ${index + 1}`}
           placeholder={line.stockId ? "" : "Select WBS to default"}
-        />
-      ));
+        />,
+      );
     case "glAccount":
-      return wrap(medClass, (
+      return wrap(
+        medClass,
         <SearchableSelect
-          compact popoverPortal withPopoverSearch
+          compact
+          popoverPortal
+          withPopoverSearch
           minPopoverWidth={600}
           options={ctx.glOptions}
           loading={ctx.glLoading}
           value={line.glAccountId ?? null}
-          selectedLabel={line.glAccountId ? `${line.glAccountCode} — ${line.glAccountName}`.trim() : ""}
+          selectedLabel={
+            line.glAccountId ? `${line.glAccountCode} — ${line.glAccountName}`.trim() : ""
+          }
           onChange={(o) => ctx.onGlSelect(line, o)}
           placeholder={ctx.glLoading ? "Loading…" : "Select GL"}
           ariaLabel={`GL Account line ${index + 1}`}
-        />
-      ));
+        />,
+      );
     case "glAccountName":
-      return wrap(wideClass, (
+      return wrap(
+        wideClass,
         <input
-          readOnly tabIndex={-1}
+          readOnly
+          tabIndex={-1}
           className="app-input h-8 px-2 py-1 text-[13px] bg-muted"
           value={line.glAccountName}
           aria-label={`GL Account Name line ${index + 1}`}
-        />
-      ));
+        />,
+      );
     case "costCentre":
-      return wrap(medClass, (
+      return wrap(
+        medClass,
         <SearchableSelect
-          compact popoverPortal withPopoverSearch
+          compact
+          popoverPortal
+          withPopoverSearch
           options={ctx.projectOptions}
           loading={ctx.projectsLoading}
           value={line.projectId != null ? String(line.projectId) : null}
@@ -1227,17 +1443,22 @@ function FieldCell({
             }
             const [code, ...rest] = o.label.split(" — ");
             onChange(line.key, {
-              projectId: Number(o.value), projectCode: code ?? "", projectName: rest.join(" — "),
+              projectId: Number(o.value),
+              projectCode: code ?? "",
+              projectName: rest.join(" — "),
             });
           }}
           placeholder={ctx.projectsLoading ? "Loading…" : "Select Cost Centre"}
           ariaLabel={`Cost Centre line ${index + 1}`}
-        />
-      ));
+        />,
+      );
     case "hqTax":
-      return wrap(medClass, (
+      return wrap(
+        medClass,
         <SearchableSelect
-          compact popoverPortal withPopoverSearch
+          compact
+          popoverPortal
+          withPopoverSearch
           options={ctx.taxOptions}
           loading={ctx.taxLoading}
           value={line.taxCodeId != null ? String(line.taxCodeId) : null}
@@ -1249,24 +1470,31 @@ function FieldCell({
             }
             const [code, ...rest] = o.label.split(" — ");
             onChange(line.key, {
-              taxCodeId: Number(o.value), taxCodeCode: code ?? "", taxCodeName: rest.join(" — "),
+              taxCodeId: Number(o.value),
+              taxCodeCode: code ?? "",
+              taxCodeName: rest.join(" — "),
             });
           }}
           placeholder={ctx.taxLoading ? "Loading…" : "Select Tax"}
           ariaLabel={`HQ Tax line ${index + 1}`}
-        />
-      ));
+        />,
+      );
     case "orderNo": {
       const tariffEmpty =
         !ctx.tariffLoading && !ctx.tariffHasError && ctx.tariffOptions.length === 0;
-      return wrap(medClass, (
+      return wrap(
+        medClass,
         <>
           <SearchableSelect
-            compact popoverPortal withPopoverSearch
+            compact
+            popoverPortal
+            withPopoverSearch
             options={ctx.tariffOptions}
             loading={ctx.tariffLoading}
             value={line.tariffCodeId != null ? String(line.tariffCodeId) : null}
-            selectedLabel={line.tariffCodeId ? `${line.tariffCodeCode} — ${line.tariffCodeName}`.trim() : ""}
+            selectedLabel={
+              line.tariffCodeId ? `${line.tariffCodeCode} — ${line.tariffCodeName}`.trim() : ""
+            }
             onChange={(o) => {
               if (!o) {
                 onChange(line.key, { tariffCodeId: null, tariffCodeCode: "", tariffCodeName: "" });
@@ -1274,7 +1502,9 @@ function FieldCell({
               }
               const [code, ...rest] = o.label.split(" — ");
               onChange(line.key, {
-                tariffCodeId: Number(o.value), tariffCodeCode: code ?? "", tariffCodeName: rest.join(" — "),
+                tariffCodeId: Number(o.value),
+                tariffCodeCode: code ?? "",
+                tariffCodeName: rest.join(" — "),
               });
             }}
             placeholder={
@@ -1292,50 +1522,56 @@ function FieldCell({
               No Tariff Codes are configured in N3
             </p>
           )}
-        </>
-      ));
+        </>,
+      );
     }
     case "qty":
-      return wrap(narrowClass, (
+      return wrap(
+        narrowClass,
         <input
           className="app-input h-8 px-2 py-1 text-[13px] tabular text-right"
           inputMode="decimal"
           value={line.qty}
           onChange={(e) => onChange(line.key, { qty: e.target.value })}
           aria-label={`Qty line ${index + 1}`}
-        />
-      ));
+        />,
+      );
     case "unitPrice":
-      return wrap(narrowClass, (
+      return wrap(
+        narrowClass,
         <input
           className="app-input h-8 px-2 py-1 text-[13px] tabular text-right"
           inputMode="decimal"
           value={line.unitPrice}
           onChange={(e) => onChange(line.key, { unitPrice: e.target.value })}
           aria-label={`Unit Price line ${index + 1}`}
-        />
-      ));
+        />,
+      );
     case "netAmount":
-      return wrap(narrowClass, (
+      return wrap(
+        narrowClass,
         <input
-          readOnly tabIndex={-1}
+          readOnly
+          tabIndex={-1}
           className="app-input h-8 px-2 py-1 text-[13px] tabular text-right bg-muted"
           value={formatMoney(ctx.lineNet(line))}
           aria-label={`Net Amount line ${index + 1}`}
-        />
-      ));
+        />,
+      );
     case "refNo":
-      return wrap(narrowClass, (
+      return wrap(
+        narrowClass,
         <input
           className="app-input h-8 px-2 py-1 text-[13px]"
           value={line.refNo}
           onChange={(e) => onChange(line.key, { refNo: e.target.value })}
           aria-label={`Ref No line ${index + 1}`}
-        />
-      ));
+        />,
+      );
     default: {
       const _: never = id;
-      void _; void readOnly;
+      void _;
+      void readOnly;
       return null;
     }
   }

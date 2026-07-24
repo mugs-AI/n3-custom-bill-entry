@@ -267,9 +267,7 @@ export function SearchableSelect({
       className="overflow-auto"
       style={{ maxHeight: listMaxHeight }}
     >
-      {loading && (
-        <li className="px-3 py-2 text-xs text-muted-foreground">Loading…</li>
-      )}
+      {loading && <li className="px-3 py-2 text-xs text-muted-foreground">Loading…</li>}
       {!loading && filtered.length === 0 && (
         <li className="px-3 py-2 text-xs text-muted-foreground">
           {options.length === 0 && emptyMessage ? emptyMessage : "No matches"}
@@ -331,9 +329,7 @@ export function SearchableSelect({
         aria-controls={listId}
         aria-autocomplete={withPopoverSearch ? "none" : "list"}
         aria-label={ariaLabel}
-        aria-activedescendant={
-          open && filtered[highlight] ? optId(highlight) : undefined
-        }
+        aria-activedescendant={open && filtered[highlight] ? optId(highlight) : undefined}
         readOnly={withPopoverSearch}
         className={compact ? "app-input h-8 px-2 py-1 text-[13px]" : "app-input"}
         placeholder={placeholder}

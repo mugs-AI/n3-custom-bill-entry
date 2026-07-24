@@ -225,7 +225,9 @@ async function n3Post<T>(
   token: string,
   path: string,
   body: unknown,
-): Promise<{ ok: true; data: T; message: string } | { ok: false; status: number; message: string }> {
+): Promise<
+  { ok: true; data: T; message: string } | { ok: false; status: number; message: string }
+> {
   let res: Response;
   try {
     res = await fetch(`${base}/${path.replace(/^\/+/, "")}`, {
@@ -274,12 +276,17 @@ async function checkDuplicate(
   const PAGE = 200;
   const MAX_PAGES = 10;
   for (let p = 0; p < MAX_PAGES; p++) {
-    const res = await n3Get<OData<PurchaseInvoiceQueryRow>>(base, token, "api/PurchaseInvoices/Query", {
-      $filter: `supplierId eq ${supplierId} and isCancelled eq false`,
-      $top: PAGE,
-      $skip: p * PAGE,
-      $orderby: "docDate desc",
-    });
+    const res = await n3Get<OData<PurchaseInvoiceQueryRow>>(
+      base,
+      token,
+      "api/PurchaseInvoices/Query",
+      {
+        $filter: `supplierId eq ${supplierId} and isCancelled eq false`,
+        $top: PAGE,
+        $skip: p * PAGE,
+        $orderby: "docDate desc",
+      },
+    );
     if (!res.ok) return { error: res.message, status: res.status };
     const rows = Array.isArray(res.data?.value) ? res.data.value : [];
     for (const row of rows) {
@@ -308,13 +315,19 @@ async function handle(request: Request): Promise<Response> {
     return jsonRes(400, { ok: false, kind: "validation", error: "Invalid JSON body" });
   }
   const parsed = coercePayload(raw);
-  if ("error" in parsed) return jsonRes(400, { ok: false, kind: "validation", error: parsed.error });
+  if ("error" in parsed)
+    return jsonRes(400, { ok: false, kind: "validation", error: parsed.error });
 
   const base = process.env.OPEN_API_BASE_URL || MAIN_DEFAULT;
 
   // Duplicate check (authoritative for this app; N3's own validation stays the
   // final arbiter).
-  const dup = await checkDuplicate(base, token, parsed.header.supplierId, parsed.header.supplierInvNo);
+  const dup = await checkDuplicate(
+    base,
+    token,
+    parsed.header.supplierId,
+    parsed.header.supplierInvNo,
+  );
   if ("error" in dup) {
     if (dup.status === 401) return jsonRes(401, { ok: false, kind: "auth", error: dup.error });
     return jsonRes(502, { ok: false, kind: "n3", error: `Duplicate check failed: ${dup.error}` });
@@ -332,7 +345,8 @@ async function handle(request: Request): Promise<Response> {
   // to supply these.
   const newDef = await n3Get<Record<string, unknown>>(base, token, "api/PurchaseInvoices/New");
   if (!newDef.ok) {
-    if (newDef.status === 401) return jsonRes(401, { ok: false, kind: "auth", error: newDef.message });
+    if (newDef.status === 401)
+      return jsonRes(401, { ok: false, kind: "auth", error: newDef.message });
     return jsonRes(502, { ok: false, kind: "n3", error: `Defaults failed: ${newDef.message}` });
   }
   const defaults = newDef.data ?? {};
@@ -373,9 +387,15 @@ async function handle(request: Request): Promise<Response> {
     referenceNo: l.referenceNo,
   }));
 
-  const created = await n3Post<Record<string, unknown>>(base, token, "api/PurchaseInvoices/Create", payload);
+  const created = await n3Post<Record<string, unknown>>(
+    base,
+    token,
+    "api/PurchaseInvoices/Create",
+    payload,
+  );
   if (!created.ok) {
-    if (created.status === 401) return jsonRes(401, { ok: false, kind: "auth", error: created.message });
+    if (created.status === 401)
+      return jsonRes(401, { ok: false, kind: "auth", error: created.message });
     return jsonRes(502, { ok: false, kind: "n3", error: created.message });
   }
   const data = created.data;
