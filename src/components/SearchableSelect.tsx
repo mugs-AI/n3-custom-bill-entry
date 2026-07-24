@@ -80,6 +80,7 @@ export function SearchableSelect({
   compact,
   withPopoverSearch,
   emptyMessage,
+  minPopoverWidth,
 }: SearchableSelectProps) {
   const listId = useId();
   const optId = (i: number) => `${listId}-opt-${i}`;
@@ -145,11 +146,18 @@ export function SearchableSelect({
       const el = inputRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
+      const vw = window.innerWidth || 1280;
+      const margin = 12;
+      const requested = Math.max(r.width, minPopoverWidth ?? 260);
+      const maxWidth = Math.max(240, vw - margin * 2);
+      const width = Math.min(requested, maxWidth);
+      let left = r.left;
+      if (left + width > vw - margin) left = Math.max(margin, vw - margin - width);
       setPopStyle({
         position: "fixed",
         top: Math.round(r.bottom + 4),
-        left: Math.round(r.left),
-        width: Math.round(Math.max(r.width, 260)),
+        left: Math.round(left),
+        width: Math.round(width),
         zIndex: 60,
       });
     };
@@ -160,7 +168,7 @@ export function SearchableSelect({
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
-  }, [open, popoverPortal, filtered.length]);
+  }, [open, popoverPortal, filtered.length, minPopoverWidth]);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
