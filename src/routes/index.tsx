@@ -800,35 +800,128 @@ function BillForm() {
 
   // ==================== Save to N3 =========================================
   const savingRef = useRef(false);
-  const canSave =
-    !suppliersQ.isLoading &&
-    !termsQ.isLoading &&
-    !stocksQ.isLoading &&
-    !glAccountsQ.isLoading &&
-    !projectsQ.isLoading &&
-    !taxCodesQ.isLoading &&
-    !tariffCodesQ.isLoading &&
-    !suppliersQ.isError &&
-    !termsQ.isError &&
-    supplierId != null &&
-    termId != null &&
-    supplierInvNo.trim().length > 0 &&
-    lines.some(
-      (l) =>
-        l.stockId != null &&
-        l.uomId != null &&
-        l.glAccountId != null &&
-        l.projectId != null &&
-        l.taxCodeId != null &&
-        l.tariffCodeId != null &&
-        Number(l.qty) > 0 &&
-        Number(l.unitPrice) >= 0 &&
-        l.itemDescription.trim().length > 0,
-    ) &&
-    save.status !== "saving";
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [invalidFields, setInvalidFields] = useState<Set<string>>(() => new Set());
+
+  // "Blocking reasons" — surfaced when validation fails, so the user knows why
+  // save couldn't proceed. Never disables the button; always shown near it.
+  const blockingReasons = useMemo(() => {
+    const r: string[] = [];
+    if (suppliersQ.isLoading) r.push("Loading Suppliers…");
+    if (termsQ.isLoading) r.push("Loading Terms…");
+    if (stocksQ.isLoading) r.push("Loading Stocks (WBS)…");
+    if (glAccountsQ.isLoading) r.push("Loading GL Accounts…");
+    if (projectsQ.isLoading) r.push("Loading Projects (Cost Centre)…");
+    if (taxCodesQ.isLoading) r.push("Loading Tax Codes…");
+    if (tariffCodesQ.isLoading) r.push("Loading Tariff Codes…");
+    if (supplierId != null && supplierDetailQ.isFetching) r.push("Loading Supplier details…");
+    for (const [i, l] of lines.entries()) {
+      if (l.stockId != null && l.uomId == null && !l.uomError)
+        r.push(`Item ${i + 1}: resolving default UOM from Stock detail…`);
+    }
+    return r;
+  }, [
+    suppliersQ.isLoading,
+    termsQ.isLoading,
+    stocksQ.isLoading,
+    glAccountsQ.isLoading,
+    projectsQ.isLoading,
+    taxCodesQ.isLoading,
+    tariffCodesQ.isLoading,
+    supplierId,
+    supplierDetailQ.isFetching,
+    lines,
+  ]);
+
+  /**
+   * Run header + line validation. Returns list of user-facing messages and
+   * the ordered field-id list (used to focus the first invalid field). Never
+   * touches state.
+   */
+  const runValidation = useCallback((): {
+    errors: string[];
+    invalidFields: string[];
+  } => {
+    const errors: string[] = [];
+    const invalid: string[] = [];
+    if (supplierId == null) {
+      errors.push("Supplier is required.");
+      invalid.push("supplier");
+    }
+    if (!docDate || !/^\d{4}-\d{2}-\d{2}$/.test(docDate)) {
+      errors.push("Document Date is required.");
+      invalid.push("docDate");
+    }
+    if (termId == null) {
+      errors.push("Term is required.");
+      invalid.push("term");
+    }
+    if (supplierInvNo.trim().length === 0) {
+      errors.push("Supplier INV# is required.");
+      invalid.push("supplierInvNo");
+    }
+    // A line is "empty" iff every selectable field is blank.
+    const isFilled = (l: DetailLine) =>
+      l.stockId != null ||
+      l.glAccountId != null ||
+      l.projectId != null ||
+      l.taxCodeId != null ||
+      l.tariffCodeId != null ||
+      l.qty.trim() !== "" ||
+      l.unitPrice.trim() !== "" ||
+      l.itemDescription.trim() !== "";
+    const filledLines = lines.filter(isFilled);
+    if (filledLines.length === 0) {
+      errors.push("Add at least one invoice line.");
+      invalid.push(`line:${lines[0]?.key ?? ""}:wbs`);
+    }
+    for (const [i, l] of lines.entries()) {
+      if (!isFilled(l)) continue;
+      const push = (id: FieldId, msg: string) => {
+        errors.push(`Item ${i + 1}: ${msg}`);
+        invalid.push(`line:${l.key}:${id}`);
+      };
+      if (l.stockId == null) push("wbs", "WBS is required.");
+      else if (l.uomId == null) push("wbs", l.uomError ?? "Default UOM is still loading.");
+      if (!l.itemDescription.trim()) push("itemDescription", "Item Description is required.");
+      if (l.glAccountId == null) push("glAccount", "GL Account is required.");
+      if (l.projectId == null) push("costCentre", "Cost Centre is required.");
+      if (l.taxCodeId == null) push("hqTax", "HQ Tax is required.");
+      if (l.tariffCodeId == null) push("orderNo", "Order No. / Tariff is required.");
+      if (!(Number(l.qty) > 0)) push("qty", "Qty must be greater than 0.");
+      if (!(Number(l.unitPrice) >= 0)) push("unitPrice", "Unit Price must be ≥ 0.");
+    }
+    return { errors, invalidFields: invalid };
+  }, [supplierId, docDate, termId, supplierInvNo, lines]);
+
+  const focusField = useCallback((id: string) => {
+    if (typeof document === "undefined") return;
+    const el = document.querySelector<HTMLElement>(`[data-field="${CSS.escape(id)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    // Prefer the first focusable child; fall back to the container.
+    const focusable = el.querySelector<HTMLElement>(
+      'input:not([readonly]):not([disabled]), button:not([disabled]), [role="combobox"], [role="searchbox"]',
+    );
+    (focusable ?? el).focus?.();
+  }, []);
 
   const onSave = async () => {
-    if (savingRef.current) return;
+    if (savingRef.current || save.status === "saving") return;
+
+    // Always run validation regardless of button state so users get a specific
+    // reason instead of a silently disabled button.
+    const { errors, invalidFields: bad } = runValidation();
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      setInvalidFields(new Set(bad));
+      setSave({ status: "idle" });
+      if (bad[0]) requestAnimationFrame(() => focusField(bad[0]));
+      return;
+    }
+    setValidationErrors([]);
+    setInvalidFields(new Set());
+
     savingRef.current = true;
     setSave({ status: "saving" });
     try {
@@ -895,6 +988,7 @@ function BillForm() {
       savingRef.current = false;
     }
   };
+
 
   if (save.status === "success" && save.docCode) {
     return <SuccessPanel docCode={save.docCode} onNew={resetForm} />;
