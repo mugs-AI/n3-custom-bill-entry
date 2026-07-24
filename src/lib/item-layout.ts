@@ -4,8 +4,9 @@
 // switching companies or accounts on the same browser doesn't leak
 // layouts across contexts.
 //
-// Field ids are immutable — they never rename after ship. Row labels /
-// display names come from FIELD_LABELS below.
+// Schema v2 (Phase 2B Correction A): adds `taxAmount` field and raises the
+// per-row cap from 6 to 7. Existing v1 layouts are migrated by appending
+// `taxAmount` to Row 2 (or Row 1 if Row 2 is full).
 
 import { decodeJwt, getToken } from "./auth-store";
 
@@ -20,6 +21,7 @@ export const FIELD_IDS = [
   "qty",
   "unitPrice",
   "netAmount",
+  "taxAmount",
   "refNo",
 ] as const;
 export type FieldId = (typeof FIELD_IDS)[number];
@@ -35,12 +37,14 @@ export const FIELD_LABELS: Record<FieldId, string> = {
   qty: "Qty",
   unitPrice: "Unit Price",
   netAmount: "Net Amount",
+  taxAmount: "Tax Amt",
   refNo: "Ref. No.",
 };
 
 export const READONLY_FIELDS: ReadonlySet<FieldId> = new Set<FieldId>([
   "glAccountName",
   "netAmount",
+  "taxAmount",
 ]);
 
 export interface ItemLayout {
@@ -49,13 +53,13 @@ export interface ItemLayout {
   row2: FieldId[];
 }
 
-export const LAYOUT_SCHEMA_VERSION = 1;
-export const MAX_PER_ROW = 6;
+export const LAYOUT_SCHEMA_VERSION = 2;
+export const MAX_PER_ROW = 7;
 
 export const DEFAULT_LAYOUT: ItemLayout = {
   schemaVersion: LAYOUT_SCHEMA_VERSION,
   row1: ["wbs", "itemDescription", "glAccount", "glAccountName", "costCentre"],
-  row2: ["hqTax", "orderNo", "qty", "unitPrice", "netAmount", "refNo"],
+  row2: ["hqTax", "orderNo", "qty", "unitPrice", "netAmount", "taxAmount", "refNo"],
 };
 
 export const LAYOUT_EVENT = "custom-bill-entry:item-layout-change";
@@ -94,14 +98,15 @@ function isFieldId(v: unknown): v is FieldId {
 /**
  * Coerce arbitrary parsed JSON into a valid layout. Unknown/obsolete field ids
  * are dropped; newly introduced fields are appended to the shorter row up to
- * MAX_PER_ROW. Never throws — corrupt input returns DEFAULT_LAYOUT.
+ * MAX_PER_ROW. Migrates schema v1 → v2 by appending `taxAmount` to Row 2 (or
+ * Row 1 if Row 2 is already full). Never throws — corrupt input returns
+ * DEFAULT_LAYOUT.
  */
 export function coerceLayout(raw: unknown): ItemLayout {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_LAYOUT };
   const r = raw as Partial<ItemLayout>;
   const r1 = Array.isArray(r.row1) ? r.row1.filter(isFieldId) : [];
   const r2 = Array.isArray(r.row2) ? r.row2.filter(isFieldId) : [];
-  // dedupe across both rows
   const seen = new Set<FieldId>();
   const row1: FieldId[] = [];
   const row2: FieldId[] = [];
@@ -115,7 +120,7 @@ export function coerceLayout(raw: unknown): ItemLayout {
       seen.add(id);
       row2.push(id);
     }
-  // append missing fields
+  // Append any missing fields (covers v1 → v2 migration for `taxAmount`).
   const defaults = [...DEFAULT_LAYOUT.row1, ...DEFAULT_LAYOUT.row2];
   for (const id of defaults) {
     if (seen.has(id)) continue;
@@ -129,7 +134,6 @@ export function coerceLayout(raw: unknown): ItemLayout {
       seen.add(id);
       continue;
     }
-    // both full — shouldn't happen with 11 fields / max 6 per row
   }
   if (row1.length === 0 || row2.length === 0) return { ...DEFAULT_LAYOUT };
   return { schemaVersion: LAYOUT_SCHEMA_VERSION, row1, row2 };

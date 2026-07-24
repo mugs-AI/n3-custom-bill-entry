@@ -9,7 +9,7 @@ import { getToken, setToken } from "@/lib/auth-store";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
 import { n3Call, n3ListAll, N3Error } from "@/lib/n3-client";
 import { todayISOInKL } from "@/lib/date-my";
-import { formatMoney, multiplyDecimal, sumTo2dp } from "@/lib/money";
+import { computeLine, formatMoney, sumTo2dp, type LineAmounts } from "@/lib/money";
 import { useItemLayout } from "@/hooks/use-item-layout";
 import { FIELD_LABELS, READONLY_FIELDS, type FieldId, type ItemLayout } from "@/lib/item-layout";
 import {
@@ -108,11 +108,14 @@ interface Project {
 interface TaxCode {
   id: number;
   code?: string;
+  /** Numeric percentage on TaxCodeLookupDto (e.g. `10` for PT-10%). */
   rate?: number;
+  taxRate?: number;
   fullName?: string;
   isActive?: boolean;
   inactive?: boolean;
 }
+type TaxCodeDetail = TaxCode;
 interface TariffCode {
   id: number;
   code?: string;
@@ -525,8 +528,80 @@ function BillForm() {
     return t ? `${t.code ?? ""} — ${t.description ?? ""}`.trim() : termLabelDraft;
   }, [termsQ.data, termId, termLabelDraft]);
 
-  const lineNet = useCallback((l: DetailLine) => multiplyDecimal(l.qty, l.unitPrice), []);
-  const totalNet = useMemo(() => sumTo2dp(lines.map(lineNet)), [lines, lineNet]);
+  // Map: taxCodeId -> numeric rate (%). Prefer the value the N3 Tax Code list
+  // returns on `rate` (or `taxRate` on some tenants). Missing entries default
+  // to 0, which produces tax = 0 without breaking net calculation.
+  const taxRateFromList = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const t of taxCodesQ.data ?? []) {
+      const r =
+        typeof t.rate === "number" ? t.rate : typeof t.taxRate === "number" ? t.taxRate : undefined;
+      if (r != null && Number.isFinite(r)) m.set(t.id, r);
+    }
+    return m;
+  }, [taxCodesQ.data]);
+
+  // Detail fallback for any selected tax code whose list row lacked a rate.
+  const [taxRateDetail, setTaxRateDetail] = useState<Map<number, number>>(() => new Map());
+  useEffect(() => {
+    const selected = new Set<number>();
+    for (const l of lines) if (l.taxCodeId != null) selected.add(l.taxCodeId);
+    const missing: number[] = [];
+    for (const id of selected) {
+      if (!taxRateFromList.has(id) && !taxRateDetail.has(id)) missing.push(id);
+    }
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const updates = new Map(taxRateDetail);
+      for (const id of missing) {
+        try {
+          const d = await n3Call<TaxCodeDetail>(`api/TaxCodes/${id}`);
+          const r =
+            typeof d?.rate === "number" ? d.rate : typeof d?.taxRate === "number" ? d.taxRate : 0;
+          updates.set(id, Number.isFinite(r) ? r : 0);
+        } catch {
+          updates.set(id, 0);
+        }
+      }
+      if (!cancelled) setTaxRateDetail(updates);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lines, taxRateFromList, taxRateDetail]);
+
+  const rateForLine = useCallback(
+    (l: DetailLine): number => {
+      if (l.taxCodeId == null) return 0;
+      const r = taxRateFromList.get(l.taxCodeId) ?? taxRateDetail.get(l.taxCodeId);
+      return typeof r === "number" && Number.isFinite(r) ? r : 0;
+    },
+    [taxRateFromList, taxRateDetail],
+  );
+
+  const amountsFor = useCallback(
+    (l: DetailLine): LineAmounts =>
+      computeLine({
+        qty: l.qty,
+        unitPrice: l.unitPrice,
+        rate: rateForLine(l),
+        inclusive: isTaxInclusive,
+      }),
+    [rateForLine, isTaxInclusive],
+  );
+
+  const lineNet = useCallback((l: DetailLine) => amountsFor(l).net, [amountsFor]);
+  const lineTax = useCallback((l: DetailLine) => amountsFor(l).tax, [amountsFor]);
+  const lineGrand = useCallback((l: DetailLine) => amountsFor(l).grand, [amountsFor]);
+  const totals = useMemo(() => {
+    const all = lines.map(amountsFor);
+    return {
+      subTotal: sumTo2dp(all.map((a) => a.net)),
+      totalTax: sumTo2dp(all.map((a) => a.tax)),
+      grandTotal: sumTo2dp(all.map((a) => a.grand)),
+    };
+  }, [lines, amountsFor]);
 
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
   const removeLine = (key: string) =>
@@ -722,35 +797,128 @@ function BillForm() {
 
   // ==================== Save to N3 =========================================
   const savingRef = useRef(false);
-  const canSave =
-    !suppliersQ.isLoading &&
-    !termsQ.isLoading &&
-    !stocksQ.isLoading &&
-    !glAccountsQ.isLoading &&
-    !projectsQ.isLoading &&
-    !taxCodesQ.isLoading &&
-    !tariffCodesQ.isLoading &&
-    !suppliersQ.isError &&
-    !termsQ.isError &&
-    supplierId != null &&
-    termId != null &&
-    supplierInvNo.trim().length > 0 &&
-    lines.some(
-      (l) =>
-        l.stockId != null &&
-        l.uomId != null &&
-        l.glAccountId != null &&
-        l.projectId != null &&
-        l.taxCodeId != null &&
-        l.tariffCodeId != null &&
-        Number(l.qty) > 0 &&
-        Number(l.unitPrice) >= 0 &&
-        l.itemDescription.trim().length > 0,
-    ) &&
-    save.status !== "saving";
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [invalidFields, setInvalidFields] = useState<Set<string>>(() => new Set());
+
+  // "Blocking reasons" — surfaced when validation fails, so the user knows why
+  // save couldn't proceed. Never disables the button; always shown near it.
+  const blockingReasons = useMemo(() => {
+    const r: string[] = [];
+    if (suppliersQ.isLoading) r.push("Loading Suppliers…");
+    if (termsQ.isLoading) r.push("Loading Terms…");
+    if (stocksQ.isLoading) r.push("Loading Stocks (WBS)…");
+    if (glAccountsQ.isLoading) r.push("Loading GL Accounts…");
+    if (projectsQ.isLoading) r.push("Loading Projects (Cost Centre)…");
+    if (taxCodesQ.isLoading) r.push("Loading Tax Codes…");
+    if (tariffCodesQ.isLoading) r.push("Loading Tariff Codes…");
+    if (supplierId != null && supplierDetailQ.isFetching) r.push("Loading Supplier details…");
+    for (const [i, l] of lines.entries()) {
+      if (l.stockId != null && l.uomId == null && !l.uomError)
+        r.push(`Item ${i + 1}: resolving default UOM from Stock detail…`);
+    }
+    return r;
+  }, [
+    suppliersQ.isLoading,
+    termsQ.isLoading,
+    stocksQ.isLoading,
+    glAccountsQ.isLoading,
+    projectsQ.isLoading,
+    taxCodesQ.isLoading,
+    tariffCodesQ.isLoading,
+    supplierId,
+    supplierDetailQ.isFetching,
+    lines,
+  ]);
+
+  /**
+   * Run header + line validation. Returns list of user-facing messages and
+   * the ordered field-id list (used to focus the first invalid field). Never
+   * touches state.
+   */
+  const runValidation = useCallback((): {
+    errors: string[];
+    invalidFields: string[];
+  } => {
+    const errors: string[] = [];
+    const invalid: string[] = [];
+    if (supplierId == null) {
+      errors.push("Supplier is required.");
+      invalid.push("supplier");
+    }
+    if (!docDate || !/^\d{4}-\d{2}-\d{2}$/.test(docDate)) {
+      errors.push("Document Date is required.");
+      invalid.push("docDate");
+    }
+    if (termId == null) {
+      errors.push("Term is required.");
+      invalid.push("term");
+    }
+    if (supplierInvNo.trim().length === 0) {
+      errors.push("Supplier INV# is required.");
+      invalid.push("supplierInvNo");
+    }
+    // A line is "empty" iff every selectable field is blank.
+    const isFilled = (l: DetailLine) =>
+      l.stockId != null ||
+      l.glAccountId != null ||
+      l.projectId != null ||
+      l.taxCodeId != null ||
+      l.tariffCodeId != null ||
+      l.qty.trim() !== "" ||
+      l.unitPrice.trim() !== "" ||
+      l.itemDescription.trim() !== "";
+    const filledLines = lines.filter(isFilled);
+    if (filledLines.length === 0) {
+      errors.push("Add at least one invoice line.");
+      invalid.push(`line:${lines[0]?.key ?? ""}:wbs`);
+    }
+    for (const [i, l] of lines.entries()) {
+      if (!isFilled(l)) continue;
+      const push = (id: FieldId, msg: string) => {
+        errors.push(`Item ${i + 1}: ${msg}`);
+        invalid.push(`line:${l.key}:${id}`);
+      };
+      if (l.stockId == null) push("wbs", "WBS is required.");
+      else if (l.uomId == null) push("wbs", l.uomError ?? "Default UOM is still loading.");
+      if (!l.itemDescription.trim()) push("itemDescription", "Item Description is required.");
+      if (l.glAccountId == null) push("glAccount", "GL Account is required.");
+      if (l.projectId == null) push("costCentre", "Cost Centre is required.");
+      if (l.taxCodeId == null) push("hqTax", "HQ Tax is required.");
+      if (l.tariffCodeId == null) push("orderNo", "Order No. / Tariff is required.");
+      if (!(Number(l.qty) > 0)) push("qty", "Qty must be greater than 0.");
+      if (!(Number(l.unitPrice) >= 0)) push("unitPrice", "Unit Price must be ≥ 0.");
+    }
+    return { errors, invalidFields: invalid };
+  }, [supplierId, docDate, termId, supplierInvNo, lines]);
+
+  const focusField = useCallback((id: string) => {
+    if (typeof document === "undefined") return;
+    const el = document.querySelector<HTMLElement>(`[data-field="${CSS.escape(id)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    // Prefer the first focusable child; fall back to the container.
+    const focusable = el.querySelector<HTMLElement>(
+      'input:not([readonly]):not([disabled]), button:not([disabled]), [role="combobox"], [role="searchbox"]',
+    );
+    (focusable ?? el).focus?.();
+  }, []);
 
   const onSave = async () => {
-    if (savingRef.current) return;
+    if (savingRef.current || save.status === "saving") return;
+
+    // Always run validation regardless of button state so users get a specific
+    // reason instead of a silently disabled button.
+    const { errors, invalidFields: bad } = runValidation();
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      setInvalidFields(new Set(bad));
+      setSave({ status: "idle" });
+      if (bad[0]) requestAnimationFrame(() => focusField(bad[0]));
+      return;
+    }
+    setValidationErrors([]);
+    setInvalidFields(new Set());
+
     savingRef.current = true;
     setSave({ status: "saving" });
     try {
@@ -851,17 +1019,39 @@ function BillForm() {
           </button>
           <button
             type="button"
-            disabled={!canSave}
+            disabled={save.status === "saving"}
             onClick={onSave}
             className="app-btn app-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-            title={
-              canSave ? "Post the Purchase Invoice to N3" : "Fill required fields before saving"
-            }
+            title="Post the Purchase Invoice to N3"
           >
-            {save.status === "saving" ? "Saving to N3…" : "Save to N3"}
+            {save.status === "saving" ? "Saving…" : "Save to N3"}
           </button>
         </div>
       </div>
+
+      {validationErrors.length > 0 && (
+        <div
+          className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          role="alert"
+          aria-live="assertive"
+        >
+          <strong>Please fix these before saving:</strong>
+          <ul className="ml-5 mt-1 list-disc">
+            {validationErrors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {validationErrors.length > 0 && blockingReasons.length > 0 && (
+        <div
+          className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm"
+          role="status"
+        >
+          <strong>Still loading:</strong> {blockingReasons.join(" · ")}
+        </div>
+      )}
 
       {save.status === "error" && save.message && (
         <div
@@ -898,9 +1088,9 @@ function BillForm() {
               value="Assigned on save"
             />
           </div>
-          <div>
+          <div data-field="docDate">
             <label className="app-label" htmlFor="doc-date">
-              Document Date
+              Document Date <span className="text-destructive">*</span>
             </label>
             <MyDateInput
               id="doc-date"
@@ -910,7 +1100,7 @@ function BillForm() {
               required
             />
           </div>
-          <div>
+          <div data-field="supplier">
             <label className="app-label">Supplier</label>
             <SearchableSelect
               options={supplierOptions}
@@ -979,7 +1169,7 @@ function BillForm() {
             <label className="app-label">Supplier Email</label>
             <input className="app-input" readOnly value={email} />
           </div>
-          <div>
+          <div data-field="term">
             <label className="app-label">
               Term <span className="text-destructive">*</span>
             </label>
@@ -1017,16 +1207,18 @@ function BillForm() {
             <label className="app-label">Reference No.</label>
             <input className="app-input" value={refNo} onChange={(e) => setRefNo(e.target.value)} />
           </div>
-          <div>
-            <label className="app-label">
+          <div data-field="supplierInvNo">
+            <label className="app-label" htmlFor="supplier-inv-no">
               Supplier INV# <span className="text-destructive">*</span>
             </label>
             <input
+              id="supplier-inv-no"
               required
-              className="app-input"
+              className={`app-input ${invalidFields.has("supplierInvNo") ? "ring-2 ring-destructive/60" : ""}`}
               value={supplierInvNo}
               onChange={(e) => setSupplierInvNo(e.target.value)}
               placeholder="Duplicate check runs on save"
+              aria-invalid={invalidFields.has("supplierInvNo") || undefined}
             />
           </div>
 
@@ -1065,8 +1257,10 @@ function BillForm() {
         onAdd={addLine}
         onRemove={removeLine}
         onChange={updateLine}
-        totalNet={totalNet}
+        totals={totals}
         lineNet={lineNet}
+        lineTax={lineTax}
+        invalidFields={invalidFields}
         stockOptions={stockOptions}
         stocksLoading={stocksQ.isLoading}
         glOptions={glOptions}
@@ -1165,6 +1359,8 @@ interface LineCtx {
   onGlSelect: (line: DetailLine, opt: ComboOption | null) => void;
   onChange: (key: string, patch: Partial<DetailLine>) => void;
   lineNet: (l: DetailLine) => number;
+  lineTax: (l: DetailLine) => number;
+  invalidFields: Set<string>;
 }
 
 function LineList({
@@ -1172,14 +1368,14 @@ function LineList({
   layout,
   onAdd,
   onRemove,
-  totalNet,
+  totals,
   ...ctx
 }: LineCtx & {
   lines: DetailLine[];
   layout: ItemLayout;
   onAdd: () => void;
   onRemove: (key: string) => void;
-  totalNet: number;
+  totals: { subTotal: number; totalTax: number; grandTotal: number };
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
 
@@ -1251,11 +1447,27 @@ function LineList({
         ))}
       </div>
 
-      <div className="flex items-center justify-between border-t-2 border-border-strong bg-surface-2 px-4 py-2">
-        <span className="text-xs font-semibold uppercase text-muted-foreground">
-          Line subtotal (MYR)
-        </span>
-        <span className="tabular font-semibold">{formatMoney(totalNet)}</span>
+      <div className="border-t-2 border-border-strong bg-surface-2 px-4 py-3">
+        <div className="ml-auto flex max-w-md flex-col gap-1 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase text-muted-foreground">
+              Sub Total (MYR)
+            </span>
+            <span className="tabular">{formatMoney(totals.subTotal)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase text-muted-foreground">
+              Total Tax (MYR)
+            </span>
+            <span className="tabular">{formatMoney(totals.totalTax)}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between border-t border-border pt-1">
+            <span className="text-xs font-bold uppercase">Grand Total (MYR)</span>
+            <span className="tabular text-base font-semibold">
+              {formatMoney(totals.grandTotal)}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1310,10 +1522,39 @@ function LineCard({
     <FieldCell key={id} id={id} line={line} index={index} error={errorFor(id)} {...ctx} />
   );
 
+  // Alternating card palette. Colour is a secondary cue; every card also has
+  // an explicit "Item N" header + numeric badge so users don't rely on colour.
+  const palette = [
+    { bg: "bg-[#f8fbff]", border: "border-l-4 border-l-sky-400", badge: "bg-sky-100 text-sky-800" },
+    {
+      bg: "bg-[#f6fbf7]",
+      border: "border-l-4 border-l-emerald-400",
+      badge: "bg-emerald-100 text-emerald-800",
+    },
+    {
+      bg: "bg-[#fffaf3]",
+      border: "border-l-4 border-l-amber-400",
+      badge: "bg-amber-100 text-amber-800",
+    },
+    {
+      bg: "bg-[#fbf7ff]",
+      border: "border-l-4 border-l-violet-400",
+      badge: "bg-violet-100 text-violet-800",
+    },
+  ];
+  const tone = palette[index % palette.length];
+
   return (
-    <div data-line-row className="grid-row-focus rounded-lg border border-border bg-surface">
+    <div
+      data-line-row
+      className={`grid-row-focus rounded-lg border border-border ${tone.border} ${tone.bg}`}
+    >
       <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">
-        <div className="text-xs font-semibold text-muted-foreground tabular">Item {index + 1}</div>
+        <span
+          className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold tabular ${tone.badge}`}
+        >
+          Item {index + 1}
+        </span>
         <button
           type="button"
           tabIndex={-1}
@@ -1349,8 +1590,14 @@ function FieldCell({
   const medClass = "min-w-[180px] flex-[1.5_1_180px]";
   const narrowClass = "min-w-[110px] flex-1";
 
+  const fieldKey = `line:${line.key}:${id}`;
+  const isInvalid = ctx.invalidFields.has(fieldKey);
+
   const wrap = (widthClass: string, content: React.ReactNode) => (
-    <div className={widthClass}>
+    <div
+      className={`${widthClass} ${isInvalid ? "rounded-md ring-2 ring-destructive/60 ring-offset-1" : ""}`}
+      data-field={fieldKey}
+    >
       <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
         {FIELD_LABELS[id]}
       </div>
@@ -1558,6 +1805,17 @@ function FieldCell({
           aria-label={`Net Amount line ${index + 1}`}
         />,
       );
+    case "taxAmount":
+      return wrap(
+        narrowClass,
+        <input
+          readOnly
+          tabIndex={-1}
+          className="app-input h-8 px-2 py-1 text-[13px] tabular text-right bg-muted"
+          value={formatMoney(ctx.lineTax(line))}
+          aria-label={`Tax Amount line ${index + 1}`}
+        />,
+      );
     case "refNo":
       return wrap(
         narrowClass,
@@ -1568,6 +1826,7 @@ function FieldCell({
           aria-label={`Ref No line ${index + 1}`}
         />,
       );
+
     default: {
       const _: never = id;
       void _;
