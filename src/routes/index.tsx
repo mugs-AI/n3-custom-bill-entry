@@ -1190,7 +1190,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
             <input
               className="app-input bg-muted text-muted-foreground"
               readOnly
-              value="Assigned on save"
+              value={isEdit ? editedDocCode || "(loading…)" : "Assigned on save"}
             />
           </div>
           <div data-field="docDate">
