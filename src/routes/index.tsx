@@ -108,11 +108,14 @@ interface Project {
 interface TaxCode {
   id: number;
   code?: string;
+  /** Numeric percentage on TaxCodeLookupDto (e.g. `10` for PT-10%). */
   rate?: number;
+  taxRate?: number;
   fullName?: string;
   isActive?: boolean;
   inactive?: boolean;
 }
+interface TaxCodeDetail extends TaxCode {}
 interface TariffCode {
   id: number;
   code?: string;
