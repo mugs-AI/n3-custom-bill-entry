@@ -7,7 +7,6 @@ import {
   FIELD_LABELS,
   MAX_PER_ROW,
   coerceLayout,
-  layoutStorageKey,
   loadLayout,
   resetLayout,
   saveLayout,
@@ -60,7 +59,7 @@ function LayoutEditor() {
 
   const dirty = useMemo(() => JSON.stringify(saved) !== JSON.stringify(draft), [saved, draft]);
   const validation = useMemo(() => validateLayout(draft), [draft]);
-  const scopeKey = layoutStorageKey();
+  
 
   const rowOf = (id: FieldId): 1 | 2 => (draft.row1.includes(id) ? 1 : 2);
 
@@ -116,10 +115,8 @@ function LayoutEditor() {
           Clearing browser data or using another device will restore the default
           layout.
         </p>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Storage key: <code className="rounded bg-surface-2 px-1">{scopeKey}</code>
-        </p>
       </header>
+
 
       {flash && (
         <div
