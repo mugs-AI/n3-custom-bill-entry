@@ -109,7 +109,10 @@ interface Project {
 interface TaxCode {
   id: number;
   code?: string;
-  /** Numeric percentage on TaxCodeLookupDto (e.g. `10` for PT-10%). */
+  /**
+   * N3 TaxCodeLookupDto.rate — a **decimal factor**, not a percentage
+   * (0.05 for PT-5%, 0.10 for PT-10%). Never divide by 100 again.
+   */
   rate?: number;
   taxRate?: number;
   fullName?: string;
