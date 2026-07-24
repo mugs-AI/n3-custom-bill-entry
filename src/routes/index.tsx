@@ -9,7 +9,7 @@ import { getToken, setToken } from "@/lib/auth-store";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
 import { n3Call, n3ListAll, N3Error } from "@/lib/n3-client";
 import { todayISOInKL } from "@/lib/date-my";
-import { formatMoney, multiplyDecimal, sumTo2dp } from "@/lib/money";
+import { computeLine, formatMoney, sumTo2dp, type LineAmounts } from "@/lib/money";
 import { useItemLayout } from "@/hooks/use-item-layout";
 import { FIELD_LABELS, READONLY_FIELDS, type FieldId, type ItemLayout } from "@/lib/item-layout";
 import {
