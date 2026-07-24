@@ -294,6 +294,8 @@ function initialFormFromDraft(d: BillDraft | null) {
 
 function BillForm() {
   const layout = useItemLayout();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   // Draft is loaded once at mount (client only). Storage-key changes (tenant/
   // user swap) are handled by clearing at auth boundaries.
   const initial = useMemo(() => initialFormFromDraft(loadDraft()), []);
