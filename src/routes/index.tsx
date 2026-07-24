@@ -1260,8 +1260,10 @@ function BillForm() {
         onAdd={addLine}
         onRemove={removeLine}
         onChange={updateLine}
-        totalNet={totalNet}
+        totals={totals}
         lineNet={lineNet}
+        lineTax={lineTax}
+        invalidFields={invalidFields}
         stockOptions={stockOptions}
         stocksLoading={stocksQ.isLoading}
         glOptions={glOptions}
@@ -1276,6 +1278,7 @@ function BillForm() {
         onStockSelect={handleStockSelect}
         onGlSelect={handleGlSelect}
       />
+
     </form>
   );
 }
