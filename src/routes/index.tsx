@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
+import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { SearchableSelect, type ComboOption } from "@/components/SearchableSelect";
 import { MyDateInput } from "@/components/MyDateInput";
-import { setToken } from "@/lib/auth-store";
+import { getToken, setToken } from "@/lib/auth-store";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
 import { n3Call, n3ListAll, N3Error } from "@/lib/n3-client";
 import { todayISOInKL } from "@/lib/date-my";
@@ -16,6 +17,14 @@ import {
   type FieldId,
   type ItemLayout,
 } from "@/lib/item-layout";
+import {
+  clearDraft,
+  draftStorageKey,
+  loadDraft,
+  saveDraft,
+  type BillDraft,
+  type DraftLine,
+} from "@/lib/draft-store";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -37,18 +46,11 @@ export const Route = createFileRoute("/")({
   component: NewBillEntry,
 });
 
-// ==================== DTO shapes (verified vs live probing) ==============
-// Suppliers:  GET  /api/Suppliers/List, GET /api/Suppliers/{id}
-// Purchasers: GET  /api/Purchasers/Query
-// Terms:      GET  /api/Terms/Query
-// Stocks:     GET  /api/Stocks/List, GET /api/Stocks/{id}
-// GL:         GET  /api/AccountCodes/Leaf/Query
-// Projects:   GET  /api/Projects/Query   (bare /api/Projects is 405; /Query is OData)
-// Tax:        GET  /api/TaxCodes/InputTax/Query
-// Tariff:     GET  /api/TariffCodes/Query
-//   Live tenants may legitimately have zero Tariff Codes configured — the
-//   dropdown surfaces "No Tariff Codes are configured in N3" in that case
-//   so users can distinguish empty master data from a request failure.
+// ==================== N3 DTO shapes (verified vs live swagger) ============
+// PurchaseInvoiceDetailDto.accountId is a UUID string; AccountCodeLookupDto.id
+// is a string. StockLookupDto.id, UOMLookupDto.id, TaxCodeLookupDto.id,
+// TariffCodeLookupDto.id, ProjectLookupDto.id, SupplierLookupDto.id,
+// PurchaserLookupDto.id, TermLookupDto.id are all integers.
 
 interface SupplierList {
   id: number;
@@ -57,7 +59,6 @@ interface SupplierList {
   email?: string;
   emailList?: string[];
   phoneNo1?: string;
-  phoneNo2?: string;
   contactPerson?: string;
   address1?: string;
   address2?: string;
@@ -78,9 +79,17 @@ interface StockListRow {
   name?: string;
   description?: string;
   baseUOM?: string;
+  matchedUomId?: number;
   isActive?: boolean;
 }
-interface AccountCode { id: number; code?: string; name?: string; isActive?: boolean }
+interface StockDetail {
+  id: number;
+  code?: string;
+  name?: string;
+  description?: string;
+  uoms?: Array<{ id: number; code?: string; isBase?: boolean; rate?: number }>;
+}
+interface AccountCode { id: string; code?: string; name?: string; isActive?: boolean }
 interface Project { id: number; code?: string; name?: string; isActive?: boolean }
 interface TaxCode {
   id: number;
@@ -98,12 +107,11 @@ interface DetailLine {
   stockCode: string;
   stockName: string;
   itemDescription: string;
-  /** True after user edits Item Description; prevents WBS re-select overwriting. */
   itemDescriptionTouched: boolean;
   uomId: number | null;
   uomCode: string;
   uomError: string | null;
-  glAccountId: number | null;
+  glAccountId: string | null;
   glAccountCode: string;
   glAccountName: string;
   projectId: number | null;
@@ -211,18 +219,68 @@ function NoAuthPanel() {
 
 // ============================== The form ==============================
 
+interface SaveState {
+  status: "idle" | "saving" | "success" | "error";
+  message?: string;
+  docCode?: string;
+}
+
+function initialFormFromDraft(d: BillDraft | null) {
+  if (!d) {
+    return {
+      docDate: todayISOInKL(),
+      supplierId: null as number | null,
+      supplierLabel: "",
+      purchaserId: null as number | null,
+      purchaserLabel: "",
+      termId: null as number | null,
+      termLabel: "",
+      termTouched: false,
+      description: "",
+      referenceNo: "",
+      supplierInvNo: "",
+      isTaxInclusive: false,
+      lines: [emptyLine()],
+    };
+  }
+  return {
+    docDate: d.docDate || todayISOInKL(),
+    supplierId: d.supplierId,
+    supplierLabel: d.supplierLabel,
+    purchaserId: d.purchaserId,
+    purchaserLabel: d.purchaserLabel,
+    termId: d.termId,
+    termLabel: d.termLabel,
+    termTouched: d.termTouched,
+    description: d.description,
+    referenceNo: d.referenceNo,
+    supplierInvNo: d.supplierInvNo,
+    isTaxInclusive: d.isTaxInclusive,
+    lines: d.lines.map((l): DetailLine => ({ ...l, uomError: null })),
+  };
+}
+
 function BillForm() {
   const layout = useItemLayout();
-  const [docDate, setDocDate] = useState(() => todayISOInKL());
-  const [supplierId, setSupplierId] = useState<number | null>(null);
-  const [purchaserId, setPurchaserId] = useState<number | null>(null);
-  const [termId, setTermId] = useState<number | null>(null);
-  const [termTouched, setTermTouched] = useState(false);
-  const [description, setDescription] = useState("");
-  const [refNo, setRefNo] = useState("");
-  const [supplierInvNo, setSupplierInvNo] = useState("");
-  const [isTaxInclusive, setIsTaxInclusive] = useState(false);
-  const [lines, setLines] = useState<DetailLine[]>(() => [emptyLine()]);
+  // Draft is loaded once at mount (client only). Storage-key changes (tenant/
+  // user swap) are handled by clearing at auth boundaries.
+  const initial = useMemo(() => initialFormFromDraft(loadDraft()), []);
+  const draftScopeAtMount = useRef<string>(draftStorageKey());
+
+  const [docDate, setDocDate] = useState(initial.docDate);
+  const [supplierId, setSupplierId] = useState<number | null>(initial.supplierId);
+  const [supplierLabelDraft, setSupplierLabelDraft] = useState<string>(initial.supplierLabel);
+  const [purchaserId, setPurchaserId] = useState<number | null>(initial.purchaserId);
+  const [purchaserLabelDraft, setPurchaserLabelDraft] = useState<string>(initial.purchaserLabel);
+  const [termId, setTermId] = useState<number | null>(initial.termId);
+  const [termLabelDraft, setTermLabelDraft] = useState<string>(initial.termLabel);
+  const [termTouched, setTermTouched] = useState(initial.termTouched);
+  const [description, setDescription] = useState(initial.description);
+  const [refNo, setRefNo] = useState(initial.referenceNo);
+  const [supplierInvNo, setSupplierInvNo] = useState(initial.supplierInvNo);
+  const [isTaxInclusive, setIsTaxInclusive] = useState(initial.isTaxInclusive);
+  const [lines, setLines] = useState<DetailLine[]>(initial.lines);
+  const [save, setSave] = useState<SaveState>({ status: "idle" });
 
   const noRetryOn401 = useCallback(
     (count: number, err: unknown) =>
@@ -255,7 +313,6 @@ function BillForm() {
     queryFn: ({ signal }) => n3ListAll<AccountCode>("api/AccountCodes/Leaf/Query", { pageSize: 500, signal }),
     staleTime: 5 * 60_000, retry: noRetryOn401,
   });
-  // Bare /api/Projects returns 405. The OData query endpoint is /api/Projects/Query.
   const projectsQ = useQuery({
     queryKey: ["n3", "projects"],
     queryFn: ({ signal }) => n3ListAll<Project>("api/Projects/Query", { pageSize: 500, signal }),
@@ -282,11 +339,12 @@ function BillForm() {
     if (termTouched) return;
     const detail = supplierDetailQ.data;
     if (!detail) return;
-    setTermId(detail.termId ?? detail.term?.id ?? null);
+    const tid = detail.termId ?? detail.term?.id ?? null;
+    if (tid != null) setTermId(tid);
   }, [supplierDetailQ.data, termTouched]);
 
   useEffect(() => {
-    if (supplierId == null) { setTermId(null); setTermTouched(false); }
+    if (supplierId == null) { setSupplierLabelDraft(""); setTermTouched(false); }
   }, [supplierId]);
 
   const collator = useMemo(
@@ -294,8 +352,8 @@ function BillForm() {
     [],
   );
 
-  const dedupe = useCallback(<T extends { id: number }>(rows: T[]): T[] => {
-    const seen = new Set<number>(); const out: T[] = [];
+  const dedupe = useCallback(<T extends { id: string | number }>(rows: T[]): T[] => {
+    const seen = new Set<string | number>(); const out: T[] = [];
     for (const r of rows) {
       if (r?.id == null || seen.has(r.id)) continue;
       seen.add(r.id); out.push(r);
@@ -353,7 +411,7 @@ function BillForm() {
 
   const glOptions: ComboOption[] = useMemo(() => {
     const rows = sortByCode(dedupe(glAccountsQ.data ?? []).filter((r) => r.isActive !== false));
-    return rows.map((r) => ({ value: String(r.id), label: `${r.code ?? ""} — ${r.name ?? ""}`.trim() }));
+    return rows.map((r) => ({ value: r.id, label: `${r.code ?? ""} — ${r.name ?? ""}`.trim() }));
   }, [glAccountsQ.data, sortByCode, dedupe]);
 
   const projectOptions: ComboOption[] = useMemo(() => {
@@ -387,8 +445,22 @@ function BillForm() {
   const phone = supplierView?.phoneNo1 ?? "";
   const contact = supplierView?.contactPerson ?? "";
   const supplierName = supplierView?.name ?? "";
-  const supplierLabel = listSupplier ? `${listSupplier.code ?? ""} — ${listSupplier.name ?? ""}`.trim() : "";
+  const supplierLabel = listSupplier
+    ? `${listSupplier.code ?? ""} — ${listSupplier.name ?? ""}`.trim()
+    : supplierLabelDraft;
   const enriching = supplierId != null && supplierDetailQ.isFetching;
+
+  const purchaserLabel = useMemo(() => {
+    if (purchaserId == null) return "";
+    const p = (purchasersQ.data ?? []).find((x) => x.id === purchaserId);
+    return p ? `${p.code ?? ""} — ${p.name ?? ""}`.trim() : purchaserLabelDraft;
+  }, [purchasersQ.data, purchaserId, purchaserLabelDraft]);
+
+  const termLabel = useMemo(() => {
+    if (termId == null) return "";
+    const t = (termsQ.data ?? []).find((x) => x.id === termId);
+    return t ? `${t.code ?? ""} — ${t.description ?? ""}`.trim() : termLabelDraft;
+  }, [termsQ.data, termId, termLabelDraft]);
 
   const lineNet = useCallback((l: DetailLine) => multiplyDecimal(l.qty, l.unitPrice), []);
   const totalNet = useMemo(() => sumTo2dp(lines.map(lineNet)), [lines, lineNet]);
@@ -396,8 +468,9 @@ function BillForm() {
   const addLine = () => setLines((ls) => [...ls, emptyLine()]);
   const removeLine = (key: string) =>
     setLines((ls) => (ls.length <= 1 ? ls : ls.filter((l) => l.key !== key)));
-  const updateLine = (key: string, patch: Partial<DetailLine>) =>
+  const updateLine = useCallback((key: string, patch: Partial<DetailLine>) => {
     setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  }, []);
 
   const stockById = useMemo(() => {
     const m = new Map<number, StockListRow>();
@@ -405,47 +478,239 @@ function BillForm() {
     return m;
   }, [stocksQ.data]);
   const glById = useMemo(() => {
-    const m = new Map<number, AccountCode>();
+    const m = new Map<string, AccountCode>();
     for (const r of glAccountsQ.data ?? []) m.set(r.id, r);
     return m;
   }, [glAccountsQ.data]);
 
-  const handleStockSelect = (line: DetailLine, opt: ComboOption | null) => {
-    if (!opt) {
+  // Fetch the Stock detail once per selected stockId to resolve the base
+  // UOM's immutable ID (required by N3 PurchaseInvoiceDetailDto.uomId).
+  const handleStockSelect = useCallback(
+    async (line: DetailLine, opt: ComboOption | null) => {
+      if (!opt) {
+        updateLine(line.key, {
+          stockId: null, stockCode: "", stockName: "",
+          itemDescription: "", itemDescriptionTouched: false,
+          uomId: null, uomCode: "", uomError: null,
+        });
+        return;
+      }
+      const id = Number(opt.value);
+      const row = stockById.get(id);
       updateLine(line.key, {
-        stockId: null, stockCode: "", stockName: "",
-        itemDescription: "", itemDescriptionTouched: false,
-        uomId: null, uomCode: "", uomError: null,
+        stockId: id,
+        stockCode: row?.code ?? "",
+        stockName: row?.name ?? "",
+        itemDescription: row?.name ?? row?.description ?? "",
+        itemDescriptionTouched: false,
+        uomId: row?.matchedUomId ?? null,
+        uomCode: row?.baseUOM ?? "",
+        uomError: null,
       });
-      return;
-    }
-    const id = Number(opt.value);
-    const row = stockById.get(id);
-    updateLine(line.key, {
-      stockId: id,
-      stockCode: row?.code ?? "",
-      stockName: row?.name ?? "",
-      // Reset description to the newly selected Stock's default; clears any
-      // previous manual edit because the WBS itself has changed.
-      itemDescription: row?.name ?? row?.description ?? "",
-      itemDescriptionTouched: false,
-      uomId: null,
-      uomCode: row?.baseUOM ?? "",
-      uomError: null,
-    });
-  };
+      try {
+        const detail = await n3Call<StockDetail>(`api/Stocks/${id}`);
+        const uoms = Array.isArray(detail?.uoms) ? detail.uoms : [];
+        const base = uoms.find((u) => u.isBase) ?? uoms[0];
+        if (base?.id != null) {
+          updateLine(line.key, { uomId: base.id, uomCode: base.code ?? "", uomError: null });
+        } else if (row?.matchedUomId == null) {
+          updateLine(line.key, { uomError: "No default UOM configured in N3" });
+        }
+      } catch (err) {
+        if (err instanceof N3Error && err.status === 401) return;
+        updateLine(line.key, {
+          uomError: err instanceof Error ? `UOM lookup failed: ${err.message}` : "UOM lookup failed",
+        });
+      }
+    },
+    [stockById, updateLine],
+  );
 
   const handleGlSelect = (line: DetailLine, opt: ComboOption | null) => {
     if (!opt) {
       updateLine(line.key, { glAccountId: null, glAccountCode: "", glAccountName: "" });
       return;
     }
-    const id = Number(opt.value);
-    const row = glById.get(id);
+    const row = glById.get(opt.value);
     updateLine(line.key, {
-      glAccountId: id, glAccountCode: row?.code ?? "", glAccountName: row?.name ?? "",
+      glAccountId: opt.value, glAccountCode: row?.code ?? "", glAccountName: row?.name ?? "",
     });
   };
+
+  // ==================== Draft persistence (sessionStorage) ================
+  // Save whenever anything the user typed/selected changes.
+  useEffect(() => {
+    if (save.status === "success") return; // do not resurrect a saved bill
+    const draft: BillDraft = {
+      schemaVersion: 1,
+      savedAt: Date.now(),
+      docDate,
+      supplierId,
+      supplierLabel: supplierLabel || supplierLabelDraft,
+      purchaserId,
+      purchaserLabel: purchaserLabel || purchaserLabelDraft,
+      termId,
+      termLabel: termLabel || termLabelDraft,
+      termTouched,
+      description,
+      referenceNo: refNo,
+      supplierInvNo,
+      isTaxInclusive,
+      lines: lines.map((l): DraftLine => ({
+        key: l.key,
+        stockId: l.stockId,
+        stockCode: l.stockCode,
+        stockName: l.stockName,
+        itemDescription: l.itemDescription,
+        itemDescriptionTouched: l.itemDescriptionTouched,
+        uomId: l.uomId,
+        uomCode: l.uomCode,
+        glAccountId: l.glAccountId,
+        glAccountCode: l.glAccountCode,
+        glAccountName: l.glAccountName,
+        projectId: l.projectId,
+        projectCode: l.projectCode,
+        projectName: l.projectName,
+        taxCodeId: l.taxCodeId,
+        taxCodeCode: l.taxCodeCode,
+        taxCodeName: l.taxCodeName,
+        tariffCodeId: l.tariffCodeId,
+        tariffCodeCode: l.tariffCodeCode,
+        tariffCodeName: l.tariffCodeName,
+        qty: l.qty,
+        unitPrice: l.unitPrice,
+        refNo: l.refNo,
+      })),
+    };
+    saveDraft(draft);
+  }, [
+    docDate, supplierId, supplierLabel, supplierLabelDraft,
+    purchaserId, purchaserLabel, purchaserLabelDraft,
+    termId, termLabel, termLabelDraft, termTouched,
+    description, refNo, supplierInvNo, isTaxInclusive, lines,
+    save.status,
+  ]);
+
+  // If the auth scope shifts (tenant/user swap) while this page is mounted,
+  // drop the old draft key we captured at mount so it doesn't linger.
+  useEffect(() => {
+    const check = () => {
+      const now = draftStorageKey();
+      if (now !== draftScopeAtMount.current) {
+        try {
+          window.sessionStorage.removeItem(draftScopeAtMount.current);
+        } catch { /* ignore */ }
+        draftScopeAtMount.current = now;
+      }
+    };
+    window.addEventListener("qne-auth-change", check);
+    window.addEventListener("storage", check);
+    return () => {
+      window.removeEventListener("qne-auth-change", check);
+      window.removeEventListener("storage", check);
+    };
+  }, []);
+
+  const resetForm = useCallback(() => {
+    clearDraft();
+    setDocDate(todayISOInKL());
+    setSupplierId(null); setSupplierLabelDraft("");
+    setPurchaserId(null); setPurchaserLabelDraft("");
+    setTermId(null); setTermLabelDraft(""); setTermTouched(false);
+    setDescription(""); setRefNo(""); setSupplierInvNo("");
+    setIsTaxInclusive(false);
+    setLines([emptyLine()]);
+    setSave({ status: "idle" });
+  }, []);
+
+  const onReset = () => {
+    if (window.confirm("Clear all entered values and start a new bill?")) resetForm();
+  };
+
+  // ==================== Save to N3 =========================================
+  const savingRef = useRef(false);
+  const canSave =
+    !suppliersQ.isLoading && !termsQ.isLoading && !stocksQ.isLoading &&
+    !glAccountsQ.isLoading && !projectsQ.isLoading && !taxCodesQ.isLoading &&
+    !tariffCodesQ.isLoading && !suppliersQ.isError && !termsQ.isError &&
+    supplierId != null && termId != null && supplierInvNo.trim().length > 0 &&
+    lines.some((l) =>
+      l.stockId != null && l.uomId != null && l.glAccountId != null &&
+      l.projectId != null && l.taxCodeId != null && l.tariffCodeId != null &&
+      Number(l.qty) > 0 && Number(l.unitPrice) >= 0 && l.itemDescription.trim().length > 0,
+    ) &&
+    save.status !== "saving";
+
+  const onSave = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSave({ status: "saving" });
+    try {
+      const t = getToken();
+      if (!t) {
+        setSave({ status: "error", message: "Session expired — please sign in again." });
+        savingRef.current = false;
+        return;
+      }
+      const body = {
+        header: {
+          supplierId,
+          docDate,
+          termId,
+          purchaserId,
+          description,
+          referenceNo: refNo,
+          supplierInvNo: supplierInvNo.trim(),
+          isTaxInclusive,
+        },
+        lines: lines.map((l) => ({
+          stockId: l.stockId,
+          uomId: l.uomId,
+          glAccountId: l.glAccountId,
+          projectId: l.projectId,
+          taxCodeId: l.taxCodeId,
+          tariffCodeId: l.tariffCodeId,
+          description: l.itemDescription,
+          qty: Number(l.qty),
+          unitPrice: Number(l.unitPrice),
+          referenceNo: l.refNo,
+        })),
+      };
+      const res = await fetch("/api/bills/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` },
+        body: JSON.stringify(body),
+      });
+      const data: unknown = await res.json().catch(() => null);
+      const d = (data ?? {}) as {
+        ok?: boolean; docCode?: string; error?: string; kind?: string;
+      };
+      if (res.ok && d.ok && d.docCode) {
+        clearDraft();
+        setSave({ status: "success", docCode: d.docCode, message: "Saved to N3" });
+      } else {
+        setSave({
+          status: "error",
+          message: d.error || `N3 rejected the request (${res.status})`,
+        });
+      }
+    } catch (err) {
+      setSave({
+        status: "error",
+        message: err instanceof Error
+          ? `Network error: ${err.message}. If unsure, verify in N3 before retrying.`
+          : "Network error.",
+      });
+    } finally {
+      savingRef.current = false;
+    }
+  };
+
+  if (save.status === "success" && save.docCode) {
+    return (
+      <SuccessPanel docCode={save.docCode} onNew={resetForm} />
+    );
+  }
 
   return (
     <form
@@ -466,19 +731,27 @@ function BillForm() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" className="app-btn" onClick={() => window.location.reload()}>
+          <button type="button" className="app-btn" onClick={onReset} disabled={save.status === "saving"}>
             Reset
           </button>
           <button
             type="button"
-            disabled
-            title="Purchase Invoice POST arrives in Phase 2B"
-            className="app-btn app-btn-primary cursor-not-allowed opacity-60"
+            disabled={!canSave}
+            onClick={onSave}
+            className="app-btn app-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+            title={canSave ? "Post the Purchase Invoice to N3" : "Fill required fields before saving"}
           >
-            Save to N3 · Available after Phase 2B
+            {save.status === "saving" ? "Saving to N3…" : "Save to N3"}
           </button>
         </div>
       </div>
+
+      {save.status === "error" && save.message && (
+        <div className="flex items-start justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive" role="alert">
+          <div><strong>Save failed:</strong> {save.message}</div>
+          <button type="button" className="app-btn" onClick={() => setSave({ status: "idle" })}>Dismiss</button>
+        </div>
+      )}
 
       <ErrorBanner label="Suppliers" query={suppliersQ} />
       <ErrorBanner label="Purchasers" query={purchasersQ} />
@@ -507,10 +780,16 @@ function BillForm() {
               options={supplierOptions}
               value={supplierId != null ? String(supplierId) : null}
               selectedLabel={supplierLabel}
-              onChange={(o) => setSupplierId(o ? Number(o.value) : null)}
+              onChange={(o) => {
+                setSupplierId(o ? Number(o.value) : null);
+                setSupplierLabelDraft(o?.label ?? "");
+              }}
               loading={suppliersQ.isLoading}
               placeholder={suppliersQ.isLoading ? "Loading suppliers…" : "Search by code or name"}
               ariaLabel="Supplier"
+              popoverPortal
+              withPopoverSearch
+              minPopoverWidth={650}
             />
             {enriching && (
               <p className="mt-1 text-[11px] text-muted-foreground" role="status">
@@ -528,7 +807,11 @@ function BillForm() {
             <SearchableSelect
               options={purchaserOptions}
               value={purchaserId != null ? String(purchaserId) : null}
-              onChange={(o) => setPurchaserId(o ? Number(o.value) : null)}
+              selectedLabel={purchaserLabel}
+              onChange={(o) => {
+                setPurchaserId(o ? Number(o.value) : null);
+                setPurchaserLabelDraft(o?.label ?? "");
+              }}
               loading={purchasersQ.isLoading}
               placeholder={purchasersQ.isLoading ? "Loading purchasers…" : "Blank — select if needed"}
               ariaLabel="Purchaser"
@@ -559,7 +842,12 @@ function BillForm() {
             <SearchableSelect
               options={termOptions}
               value={termId != null ? String(termId) : null}
-              onChange={(o) => { setTermTouched(true); setTermId(o ? Number(o.value) : null); }}
+              selectedLabel={termLabel}
+              onChange={(o) => {
+                setTermTouched(true);
+                setTermId(o ? Number(o.value) : null);
+                setTermLabelDraft(o?.label ?? "");
+              }}
               loading={termsQ.isLoading}
               placeholder={termsQ.isLoading ? "Loading terms…" : supplierId ? "Default from supplier" : "Select a term"}
               ariaLabel="Term"
@@ -576,7 +864,7 @@ function BillForm() {
           </div>
           <div>
             <label className="app-label">Supplier INV# <span className="text-destructive">*</span></label>
-            <input required className="app-input" value={supplierInvNo} onChange={(e) => setSupplierInvNo(e.target.value)} placeholder="Duplicate check on save (Phase 2B)" />
+            <input required className="app-input" value={supplierInvNo} onChange={(e) => setSupplierInvNo(e.target.value)} placeholder="Duplicate check runs on save" />
           </div>
 
           <div className="md:col-span-3 mt-1 flex items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-2">
@@ -628,6 +916,26 @@ function BillForm() {
         onGlSelect={handleGlSelect}
       />
     </form>
+  );
+}
+
+function SuccessPanel({ docCode, onNew }: { docCode: string; onNew: () => void }) {
+  return (
+    <div className="app-card mx-auto max-w-xl p-6 text-center">
+      <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-success/10 text-success" aria-hidden>
+        ✓
+      </div>
+      <h1 className="text-lg font-semibold">Purchase Invoice created in N3</h1>
+      <p className="mt-2 text-sm text-muted-foreground">
+        N3 assigned document number
+      </p>
+      <p className="mt-1 text-2xl font-semibold tabular tracking-tight">{docCode}</p>
+      <div className="mt-5 flex items-center justify-center gap-2">
+        <button type="button" className="app-btn app-btn-primary" onClick={onNew}>
+          Create Another Bill
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -707,8 +1015,6 @@ function LineList({
 
   const handleGridKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Enter") return;
-    // Don't hijack Enter inside a search input inside a popover — that's the
-    // dropdown's own commit key. SearchableSelect preventDefaults it too.
     const t = e.target as HTMLElement;
     if (t.getAttribute("role") === "searchbox" || t.getAttribute("role") === "combobox") return;
     e.preventDefault();
@@ -861,6 +1167,7 @@ function FieldCell({
       return wrap(medClass, (
         <SearchableSelect
           compact popoverPortal withPopoverSearch
+          minPopoverWidth={750}
           options={ctx.stockOptions}
           loading={ctx.stocksLoading}
           value={line.stockId != null ? String(line.stockId) : null}
@@ -886,9 +1193,10 @@ function FieldCell({
       return wrap(medClass, (
         <SearchableSelect
           compact popoverPortal withPopoverSearch
+          minPopoverWidth={600}
           options={ctx.glOptions}
           loading={ctx.glLoading}
-          value={line.glAccountId != null ? String(line.glAccountId) : null}
+          value={line.glAccountId ?? null}
           selectedLabel={line.glAccountId ? `${line.glAccountCode} — ${line.glAccountName}`.trim() : ""}
           onChange={(o) => ctx.onGlSelect(line, o)}
           placeholder={ctx.glLoading ? "Loading…" : "Select GL"}
