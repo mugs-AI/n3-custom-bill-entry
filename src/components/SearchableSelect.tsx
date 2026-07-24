@@ -12,17 +12,20 @@ import { createPortal } from "react-dom";
 
 // Keyboard-first accessible combobox/listbox.
 //
-// Behaviour contract:
-//  - Selecting an option commits immediately; the input shows the label BEFORE
-//    any parent effect resolves. `query` stays null unless the user is editing.
-//  - Arrow / Home / End move the highlight and always scrollIntoView it.
-//  - Enter commits the highlighted option (or calls onEnter if no dropdown is
-//    open). We preventDefault so form submission never fires, but we do NOT
-//    stopPropagation — the enclosing grid handler listens for Enter to advance
-//    focus to the next field. That makes the whole row navigate on Enter.
-//  - `popoverPortal` renders the option list in a fixed-positioned portal so
-//    it escapes clipping by an ancestor `overflow-*` container (the invoice
-//    detail grid needs horizontal scroll but the popover must remain visible).
+// Two modes:
+//  - default: trigger input is the search box (compact for grid cells,
+//    used for Supplier/Purchaser/Term where behavior must not regress).
+//  - withPopoverSearch: the trigger is a display of the committed label;
+//    an autofocused search input lives at the top of the popover. This
+//    is used for line dropdowns (WBS, GL, Cost Centre, HQ Tax, Order No.)
+//    so the search box is always clearly visible.
+//
+// Selecting an option commits immediately; the input shows the label BEFORE
+// any parent effect resolves. Arrow / Home / End move the highlight and
+// always scrollIntoView it. Enter commits the highlighted option (or calls
+// onEnter if no dropdown is open). We preventDefault so form submission
+// never fires, but we do NOT stopPropagation — the enclosing grid handler
+// listens for Enter to advance focus to the next field.
 
 export interface ComboOption {
   value: string;
@@ -45,6 +48,14 @@ export interface SearchableSelectProps {
   popoverPortal?: boolean;
   /** Optional visual variant for embedded grid cells (removes chrome). */
   compact?: boolean;
+  /**
+   * When true, render an autofocused search input at the top of the popover
+   * and turn the trigger into a display of the committed label. Keyboard
+   * navigation continues to work identically.
+   */
+  withPopoverSearch?: boolean;
+  /** Shown as an empty-state hint when options.length === 0 and !loading. */
+  emptyMessage?: string;
 }
 
 export function SearchableSelect({
@@ -60,6 +71,8 @@ export function SearchableSelect({
   selectedLabel,
   popoverPortal,
   compact,
+  withPopoverSearch,
+  emptyMessage,
 }: SearchableSelectProps) {
   const listId = useId();
   const optId = (i: number) => `${listId}-opt-${i}`;
@@ -67,8 +80,10 @@ export function SearchableSelect({
   const [query, setQuery] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const [popStyle, setPopStyle] = useState<CSSProperties>({});
 
   const committedLabel = useMemo(() => {
@@ -104,6 +119,17 @@ export function SearchableSelect({
     el?.scrollIntoView({ block: "nearest" });
   }, [highlight, open, filtered.length]);
 
+  // Autofocus the popover search input when opened in withPopoverSearch mode.
+  useEffect(() => {
+    if (!open || !withPopoverSearch) return;
+    // requestAnimationFrame lets the portal mount before we focus.
+    const raf = requestAnimationFrame(() => {
+      searchRef.current?.focus();
+      searchRef.current?.select();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [open, withPopoverSearch]);
+
   // Position the portal popover under the input, using fixed coords so an
   // ancestor scroll container cannot clip it. Reposition on scroll/resize.
   useLayoutEffect(() => {
@@ -116,7 +142,7 @@ export function SearchableSelect({
         position: "fixed",
         top: Math.round(r.bottom + 4),
         left: Math.round(r.left),
-        width: Math.round(Math.max(r.width, 240)),
+        width: Math.round(Math.max(r.width, 260)),
         zIndex: 60,
       });
     };
@@ -134,7 +160,9 @@ export function SearchableSelect({
       const target = e.target as Node;
       if (containerRef.current?.contains(target)) return;
       if (listRef.current?.contains(target)) return;
+      if (popRef.current?.contains(target)) return;
       setOpen(false);
+      setQuery(null);
     };
     document.addEventListener("mousedown", onDocClick);
     return () => document.removeEventListener("mousedown", onDocClick);
@@ -176,6 +204,8 @@ export function SearchableSelect({
           e.preventDefault();
           setOpen(false);
           setQuery(null);
+          // Return focus to the trigger so subsequent Tab works predictably.
+          if (withPopoverSearch) inputRef.current?.focus();
         }
         return;
       case "Enter":
@@ -190,23 +220,41 @@ export function SearchableSelect({
     }
   };
 
-  const list = (
+  const searchBox = withPopoverSearch ? (
+    <div className="border-b border-border bg-surface p-2">
+      <input
+        ref={searchRef}
+        type="text"
+        role="searchbox"
+        aria-controls={listId}
+        aria-label={`${ariaLabel ?? "Options"} search`}
+        placeholder="Search code or name"
+        className="app-input h-8 px-2 py-1 text-[13px]"
+        value={query ?? ""}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+          setHighlight(0);
+        }}
+        onKeyDown={handleKeyDown}
+      />
+    </div>
+  ) : null;
+
+  const listUl = (
     <ul
       id={listId}
       ref={listRef}
       role="listbox"
-      style={popoverPortal ? popStyle : undefined}
-      className={
-        popoverPortal
-          ? "max-h-64 overflow-auto rounded-md border border-border-strong bg-surface shadow-lg"
-          : "absolute z-30 mt-1 max-h-64 w-full min-w-[220px] overflow-auto rounded-md border border-border-strong bg-surface shadow-lg"
-      }
+      className="max-h-64 overflow-auto"
     >
       {loading && (
         <li className="px-3 py-2 text-xs text-muted-foreground">Loading…</li>
       )}
       {!loading && filtered.length === 0 && (
-        <li className="px-3 py-2 text-xs text-muted-foreground">No matches</li>
+        <li className="px-3 py-2 text-xs text-muted-foreground">
+          {options.length === 0 && emptyMessage ? emptyMessage : "No matches"}
+        </li>
       )}
       {filtered.map((opt, i) => (
         <li
@@ -236,6 +284,21 @@ export function SearchableSelect({
     </ul>
   );
 
+  const popover = (
+    <div
+      ref={popRef}
+      style={popoverPortal ? popStyle : undefined}
+      className={
+        popoverPortal
+          ? "rounded-md border border-border-strong bg-surface shadow-lg"
+          : "absolute z-30 mt-1 w-full min-w-[240px] rounded-md border border-border-strong bg-surface shadow-lg"
+      }
+    >
+      {searchBox}
+      {listUl}
+    </div>
+  );
+
   return (
     <div ref={containerRef} className={`relative ${className ?? ""}`}>
       <input
@@ -243,27 +306,32 @@ export function SearchableSelect({
         role="combobox"
         aria-expanded={open}
         aria-controls={listId}
-        aria-autocomplete="list"
+        aria-autocomplete={withPopoverSearch ? "none" : "list"}
         aria-label={ariaLabel}
         aria-activedescendant={
           open && filtered[highlight] ? optId(highlight) : undefined
         }
+        readOnly={withPopoverSearch}
         className={compact ? "app-input h-8 px-2 py-1 text-[13px]" : "app-input"}
         placeholder={placeholder}
         value={shownValue}
         disabled={disabled}
         onFocus={() => {
           setOpen(true);
-          requestAnimationFrame(() => inputRef.current?.select());
+          if (!withPopoverSearch) {
+            requestAnimationFrame(() => inputRef.current?.select());
+          }
         }}
+        onClick={() => setOpen(true)}
         onChange={(e) => {
+          if (withPopoverSearch) return;
           setQuery(e.target.value);
           setOpen(true);
           setHighlight(0);
         }}
         onKeyDown={handleKeyDown}
       />
-      {committedLabel && !open && !compact && (
+      {committedLabel && !open && !compact && !withPopoverSearch && (
         <button
           type="button"
           tabIndex={-1}
@@ -279,8 +347,8 @@ export function SearchableSelect({
       )}
       {open &&
         (popoverPortal && typeof document !== "undefined"
-          ? createPortal(list, document.body)
-          : list)}
+          ? createPortal(popover, document.body)
+          : popover)}
     </div>
   );
 }

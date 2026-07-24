@@ -29,6 +29,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <NavLink to="/">New Bill</NavLink>
             <NavLink to="/history">History</NavLink>
             <NavLink to="/reports">GL Analysis</NavLink>
+            <NavLink to="/settings">Settings</NavLink>
           </nav>
           <div className="ml-auto flex items-center gap-3">
             {isDev && (
