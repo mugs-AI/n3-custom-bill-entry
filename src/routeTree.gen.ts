@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as DevLoginRouteImport } from './routes/dev-login'
@@ -16,6 +17,11 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiAuthDevConnectRouteImport } from './routes/api/auth/dev-connect'
 
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReportsRoute = ReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
@@ -52,6 +58,7 @@ export interface FileRoutesByFullPath {
   '/dev-login': typeof DevLoginRoute
   '/history': typeof HistoryRoute
   '/reports': typeof ReportsRoute
+  '/settings': typeof SettingsRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
 }
@@ -60,6 +67,7 @@ export interface FileRoutesByTo {
   '/dev-login': typeof DevLoginRoute
   '/history': typeof HistoryRoute
   '/reports': typeof ReportsRoute
+  '/settings': typeof SettingsRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
 }
@@ -69,6 +77,7 @@ export interface FileRoutesById {
   '/dev-login': typeof DevLoginRoute
   '/history': typeof HistoryRoute
   '/reports': typeof ReportsRoute
+  '/settings': typeof SettingsRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
 }
@@ -79,6 +88,7 @@ export interface FileRouteTypes {
     | '/dev-login'
     | '/history'
     | '/reports'
+    | '/settings'
     | '/api/auth/dev-connect'
     | '/api/proxy/$'
   fileRoutesByTo: FileRoutesByTo
@@ -87,6 +97,7 @@ export interface FileRouteTypes {
     | '/dev-login'
     | '/history'
     | '/reports'
+    | '/settings'
     | '/api/auth/dev-connect'
     | '/api/proxy/$'
   id:
@@ -95,6 +106,7 @@ export interface FileRouteTypes {
     | '/dev-login'
     | '/history'
     | '/reports'
+    | '/settings'
     | '/api/auth/dev-connect'
     | '/api/proxy/$'
   fileRoutesById: FileRoutesById
@@ -104,12 +116,20 @@ export interface RootRouteChildren {
   DevLoginRoute: typeof DevLoginRoute
   HistoryRoute: typeof HistoryRoute
   ReportsRoute: typeof ReportsRoute
+  SettingsRoute: typeof SettingsRoute
   ApiAuthDevConnectRoute: typeof ApiAuthDevConnectRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reports': {
       id: '/reports'
       path: '/reports'
@@ -160,6 +180,7 @@ const rootRouteChildren: RootRouteChildren = {
   DevLoginRoute: DevLoginRoute,
   HistoryRoute: HistoryRoute,
   ReportsRoute: ReportsRoute,
+  SettingsRoute: SettingsRoute,
   ApiAuthDevConnectRoute: ApiAuthDevConnectRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
 }
