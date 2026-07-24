@@ -50,6 +50,8 @@ interface CreatePayload {
     description: string;
     qty: number;
     unitPrice: number;
+    /** Decimal factor from N3 TaxCodeLookupDto.rate (0.05 for PT-5%). */
+    taxRateFactor: number;
     referenceNo: string;
   }>;
 }
@@ -155,6 +157,14 @@ function coercePayload(raw: unknown): CreatePayload | { error: string } {
     if (!isFiniteNumber(unitPrice) || unitPrice < 0)
       return { error: `Line ${i + 1}: Unit Price must be ≥ 0` };
 
+    // Rate factor: N3 returns decimal (0.05 for PT-5%). Reject unrealistic
+    // values so a broken client can't post 500%+ tax.
+    const rawRateFactor = (l as Record<string, unknown>).taxRateFactor;
+    const taxRateFactor =
+      isFiniteNumber(rawRateFactor) && rawRateFactor >= 0 && rawRateFactor <= 1
+        ? rawRateFactor
+        : 0;
+
     outLines.push({
       stockId,
       uomId,
@@ -165,6 +175,7 @@ function coercePayload(raw: unknown): CreatePayload | { error: string } {
       description,
       qty,
       unitPrice,
+      taxRateFactor,
       referenceNo: typeof l.referenceNo === "string" ? l.referenceNo.trim() : "",
     });
   }
@@ -359,6 +370,9 @@ async function handle(request: Request): Promise<Response> {
   // browser reaches N3.
   const payload: Record<string, unknown> = {
     docDate: parsed.header.docDate,
+    // Phase 2B-B: dueDate mirrors docDate — the app does not expose separate
+    // terms UI, and N3 requires a valid due date for reporting.
+    dueDate: parsed.header.docDate,
     supplierId: parsed.header.supplierId,
     currencyId,
     currencyRate: 1,
@@ -371,21 +385,48 @@ async function handle(request: Request): Promise<Response> {
   if (parsed.header.purchaserId != null) payload.purchaserId = parsed.header.purchaserId;
   if (stockLocationId != null) payload.stockLocationId = stockLocationId;
 
-  payload.itemDetails = parsed.lines.map((l, i) => ({
-    pos: i + 1,
-    stockId: l.stockId,
-    uomId: l.uomId,
-    accountId: l.glAccountId,
-    projectId: l.projectId,
-    taxCodeId: l.taxCodeId,
-    tariffCodeId: l.tariffCodeId,
-    description: l.description,
-    qty: l.qty,
-    unitPrice: l.unitPrice,
-    discount: "0",
-    isTaxInclusive: parsed.header.isTaxInclusive,
-    referenceNo: l.referenceNo,
-  }));
+  // Server-side tax math mirrors src/lib/money.ts. We compute net/tax/gross
+  // per line using the same half-up 2dp rounding rule, then send taxRate,
+  // taxAmount, netAmount and subAmount so N3 stores the same values the UI
+  // displayed. rateFactor is a decimal (0.05 for PT-5%).
+  const round2 = (n: number) =>
+    Number.isFinite(n) ? Math.sign(n) * Math.round(Math.abs(n) * 100) / 100 : 0;
+
+  payload.itemDetails = parsed.lines.map((l, i) => {
+    const rf = l.taxRateFactor;
+    const inclusive = parsed.header.isTaxInclusive;
+    const raw = l.qty * l.unitPrice;
+    let net: number, tax: number, gross: number;
+    if (inclusive) {
+      gross = round2(raw);
+      tax = rf > 0 ? round2((gross * rf) / (1 + rf)) : 0;
+      net = round2(gross - tax);
+    } else {
+      net = round2(raw);
+      tax = rf > 0 ? round2(net * rf) : 0;
+      gross = round2(net + tax);
+    }
+    return {
+      pos: i + 1,
+      stockId: l.stockId,
+      uomId: l.uomId,
+      accountId: l.glAccountId,
+      projectId: l.projectId,
+      taxCodeId: l.taxCodeId,
+      tariffCodeId: l.tariffCodeId,
+      description: l.description,
+      qty: l.qty,
+      unitPrice: l.unitPrice,
+      discount: "0",
+      isTaxInclusive: inclusive,
+      taxRate: rf,
+      taxAmount: tax,
+      netAmount: net,
+      subAmount: gross,
+      taxExclusiveAmount: net,
+      referenceNo: l.referenceNo,
+    };
+  });
 
   const created = await n3Post<Record<string, unknown>>(
     base,

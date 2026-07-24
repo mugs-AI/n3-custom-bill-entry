@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { SearchableSelect, type ComboOption } from "@/components/SearchableSelect";
 import { MyDateInput } from "@/components/MyDateInput";
@@ -20,6 +20,7 @@ import {
   type BillDraft,
   type DraftLine,
 } from "@/lib/draft-store";
+import { HISTORY_QUERY_KEY } from "@/lib/history-query";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -108,7 +109,10 @@ interface Project {
 interface TaxCode {
   id: number;
   code?: string;
-  /** Numeric percentage on TaxCodeLookupDto (e.g. `10` for PT-10%). */
+  /**
+   * N3 TaxCodeLookupDto.rate — a **decimal factor**, not a percentage
+   * (0.05 for PT-5%, 0.10 for PT-10%). Never divide by 100 again.
+   */
   rate?: number;
   taxRate?: number;
   fullName?: string;
@@ -290,6 +294,8 @@ function initialFormFromDraft(d: BillDraft | null) {
 
 function BillForm() {
   const layout = useItemLayout();
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
   // Draft is loaded once at mount (client only). Storage-key changes (tenant/
   // user swap) are handled by clearing at auth boundaries.
   const initial = useMemo(() => initialFormFromDraft(loadDraft()), []);
@@ -528,10 +534,10 @@ function BillForm() {
     return t ? `${t.code ?? ""} — ${t.description ?? ""}`.trim() : termLabelDraft;
   }, [termsQ.data, termId, termLabelDraft]);
 
-  // Map: taxCodeId -> numeric rate (%). Prefer the value the N3 Tax Code list
-  // returns on `rate` (or `taxRate` on some tenants). Missing entries default
-  // to 0, which produces tax = 0 without breaking net calculation.
-  const taxRateFromList = useMemo(() => {
+  // Map: taxCodeId -> **rate factor** (0.05 for PT-5%, 0.10 for PT-10%). The
+  // N3 TaxCodeLookupDto.rate is a decimal factor, not a percentage. Missing
+  // entries default to 0, which produces tax = 0 without breaking net math.
+  const taxRateFactorFromList = useMemo(() => {
     const m = new Map<number, number>();
     for (const t of taxCodesQ.data ?? []) {
       const r =
@@ -542,18 +548,20 @@ function BillForm() {
   }, [taxCodesQ.data]);
 
   // Detail fallback for any selected tax code whose list row lacked a rate.
-  const [taxRateDetail, setTaxRateDetail] = useState<Map<number, number>>(() => new Map());
+  const [taxRateFactorDetail, setTaxRateFactorDetail] = useState<Map<number, number>>(
+    () => new Map(),
+  );
   useEffect(() => {
     const selected = new Set<number>();
     for (const l of lines) if (l.taxCodeId != null) selected.add(l.taxCodeId);
     const missing: number[] = [];
     for (const id of selected) {
-      if (!taxRateFromList.has(id) && !taxRateDetail.has(id)) missing.push(id);
+      if (!taxRateFactorFromList.has(id) && !taxRateFactorDetail.has(id)) missing.push(id);
     }
     if (missing.length === 0) return;
     let cancelled = false;
     (async () => {
-      const updates = new Map(taxRateDetail);
+      const updates = new Map(taxRateFactorDetail);
       for (const id of missing) {
         try {
           const d = await n3Call<TaxCodeDetail>(`api/TaxCodes/${id}`);
@@ -564,20 +572,20 @@ function BillForm() {
           updates.set(id, 0);
         }
       }
-      if (!cancelled) setTaxRateDetail(updates);
+      if (!cancelled) setTaxRateFactorDetail(updates);
     })();
     return () => {
       cancelled = true;
     };
-  }, [lines, taxRateFromList, taxRateDetail]);
+  }, [lines, taxRateFactorFromList, taxRateFactorDetail]);
 
-  const rateForLine = useCallback(
+  const rateFactorForLine = useCallback(
     (l: DetailLine): number => {
       if (l.taxCodeId == null) return 0;
-      const r = taxRateFromList.get(l.taxCodeId) ?? taxRateDetail.get(l.taxCodeId);
+      const r = taxRateFactorFromList.get(l.taxCodeId) ?? taxRateFactorDetail.get(l.taxCodeId);
       return typeof r === "number" && Number.isFinite(r) ? r : 0;
     },
-    [taxRateFromList, taxRateDetail],
+    [taxRateFactorFromList, taxRateFactorDetail],
   );
 
   const amountsFor = useCallback(
@@ -585,10 +593,10 @@ function BillForm() {
       computeLine({
         qty: l.qty,
         unitPrice: l.unitPrice,
-        rate: rateForLine(l),
+        rateFactor: rateFactorForLine(l),
         inclusive: isTaxInclusive,
       }),
-    [rateForLine, isTaxInclusive],
+    [rateFactorForLine, isTaxInclusive],
   );
 
   const lineNet = useCallback((l: DetailLine) => amountsFor(l).net, [amountsFor]);
@@ -949,6 +957,9 @@ function BillForm() {
           description: l.itemDescription,
           qty: Number(l.qty),
           unitPrice: Number(l.unitPrice),
+          // Rate factor from N3 TaxCodeLookupDto.rate (0.05 for PT-5%). Server
+          // re-validates and mirrors the calculation before POST.
+          taxRateFactor: rateFactorForLine(l),
           referenceNo: l.refNo,
         })),
       };
@@ -966,6 +977,12 @@ function BillForm() {
       };
       if (res.ok && d.ok && d.docCode) {
         clearDraft();
+        // Invalidate History cache so the new invoice appears immediately.
+        try {
+          queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY });
+        } catch {
+          /* best effort */
+        }
         setSave({ status: "success", docCode: d.docCode, message: "Saved to N3" });
       } else {
         setSave({
@@ -987,7 +1004,7 @@ function BillForm() {
   };
 
   if (save.status === "success" && save.docCode) {
-    return <SuccessPanel docCode={save.docCode} onNew={resetForm} />;
+    return <SuccessPanel docCode={save.docCode} onNew={resetForm} navigate={navigate} />;
   }
 
   return (
@@ -1279,7 +1296,15 @@ function BillForm() {
   );
 }
 
-function SuccessPanel({ docCode, onNew }: { docCode: string; onNew: () => void }) {
+function SuccessPanel({
+  docCode,
+  onNew,
+  navigate,
+}: {
+  docCode: string;
+  onNew: () => void;
+  navigate: ReturnType<typeof useNavigate>;
+}) {
   return (
     <div className="app-card mx-auto max-w-xl p-6 text-center">
       <div
@@ -1291,9 +1316,16 @@ function SuccessPanel({ docCode, onNew }: { docCode: string; onNew: () => void }
       <h1 className="text-lg font-semibold">Purchase Invoice created in N3</h1>
       <p className="mt-2 text-sm text-muted-foreground">N3 assigned document number</p>
       <p className="mt-1 text-2xl font-semibold tabular tracking-tight">{docCode}</p>
-      <div className="mt-5 flex items-center justify-center gap-2">
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
         <button type="button" className="app-btn app-btn-primary" onClick={onNew}>
           Create Another Bill
+        </button>
+        <button
+          type="button"
+          className="app-btn"
+          onClick={() => navigate({ to: "/history", search: { q: docCode } })}
+        >
+          View in History
         </button>
       </div>
     </div>

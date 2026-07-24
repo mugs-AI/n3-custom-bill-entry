@@ -1,11 +1,20 @@
 // Decimal-safe money helpers for the New Bill Entry grid.
 //
-// We compute net amounts as `qty * unitPrice` — floating-point multiplication
-// like `0.1 * 0.2` produces visible precision garbage. To avoid that, we scale
-// both operands to their combined decimal precision using string parsing and
-// BigInt, then round back down to 4 fractional digits (enough for MYR unit
-// prices to two decimals and quantities to four). Display always uses two
-// decimals via `formatMoney`.
+// Rate representation (Phase 2B Correction B):
+//
+// The N3 Tax Code API (`GET /api/TaxCodes/InputTax/Query`, `GET /api/TaxCodes/{id}`)
+// returns `TaxCodeLookupDto.rate` as a **decimal factor**, not a whole percentage.
+//   - PT-5%  → rate 0.05
+//   - PT-10% → rate 0.10
+//
+// All code that touches tax math must treat the API value as `rateFactor` and
+// use it directly without dividing by 100. Do NOT parse the percentage from
+// the tax-code label and do NOT apply a heuristic guessing whether a value
+// is a factor or a percentage.
+//
+// Net amounts use decimal-safe multiplication via BigInt so that
+// `0.1 * 0.2` does not leak floating-point garbage. Per-line rounding is
+// always to 2 decimals, done BEFORE totals are summed.
 
 const NUM_RE = /^-?\d+(?:\.\d+)?$/;
 
@@ -73,31 +82,42 @@ export interface LineAmounts {
 }
 
 /**
- * Compute per-line net/tax/grand given qty, unit price, rate (percentage) and
- * the Tax Inclusive flag. Rate is the numeric percentage from the N3 Tax Code
- * DTO (e.g. `10` for PT-10%). A missing / zero rate produces tax = 0.
+ * Compute per-line net/tax/grand.
  *
- * Tax-exclusive: net = round(qty*price, 2); tax = round(net*rate/100, 2).
- * Tax-inclusive: gross = round(qty*price, 2);
- *                tax = round(gross*rate/(100+rate), 2); net = gross - tax.
+ * `rateFactor` is the N3 Tax Code decimal factor (0.05 for PT-5%, 0.10 for
+ * PT-10%). A missing / zero / negative rate produces tax = 0.
+ *
+ * Tax-exclusive:
+ *   net   = round(qty * price, 2)
+ *   tax   = round(net * rateFactor, 2)
+ *   grand = net + tax
+ *
+ * Tax-inclusive:
+ *   gross = round(qty * price, 2)
+ *   tax   = round(gross * rateFactor / (1 + rateFactor), 2)
+ *   net   = gross - tax
+ *   grand = gross
  */
 export function computeLine(input: {
   qty: string;
   unitPrice: string;
-  rate: number | null | undefined;
+  rateFactor: number | null | undefined;
   inclusive: boolean;
 }): LineAmounts {
-  const rate = Number.isFinite(input.rate as number) ? Math.max(0, Number(input.rate)) : 0;
+  const rateFactor =
+    Number.isFinite(input.rateFactor as number) && (input.rateFactor as number) > 0
+      ? Number(input.rateFactor)
+      : 0;
   const raw = multiplyDecimal(input.qty, input.unitPrice);
   if (input.inclusive) {
     const grand = round2(raw);
-    if (rate <= 0) return { net: grand, tax: 0, grand };
-    const tax = round2((grand * rate) / (100 + rate));
+    if (rateFactor <= 0) return { net: grand, tax: 0, grand };
+    const tax = round2((grand * rateFactor) / (1 + rateFactor));
     const net = round2(grand - tax);
     return { net, tax, grand };
   }
   const net = round2(raw);
-  const tax = rate > 0 ? round2((net * rate) / 100) : 0;
+  const tax = rateFactor > 0 ? round2(net * rateFactor) : 0;
   const grand = round2(net + tax);
   return { net, tax, grand };
 }
