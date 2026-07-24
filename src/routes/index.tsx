@@ -1526,10 +1526,27 @@ function LineCard({
     <FieldCell key={id} id={id} line={line} index={index} error={errorFor(id)} {...ctx} />
   );
 
+  // Alternating card palette. Colour is a secondary cue; every card also has
+  // an explicit "Item N" header + numeric badge so users don't rely on colour.
+  const palette = [
+    { bg: "bg-[#f8fbff]", border: "border-l-4 border-l-sky-400", badge: "bg-sky-100 text-sky-800" },
+    { bg: "bg-[#f6fbf7]", border: "border-l-4 border-l-emerald-400", badge: "bg-emerald-100 text-emerald-800" },
+    { bg: "bg-[#fffaf3]", border: "border-l-4 border-l-amber-400", badge: "bg-amber-100 text-amber-800" },
+    { bg: "bg-[#fbf7ff]", border: "border-l-4 border-l-violet-400", badge: "bg-violet-100 text-violet-800" },
+  ];
+  const tone = palette[index % palette.length];
+
   return (
-    <div data-line-row className="grid-row-focus rounded-lg border border-border bg-surface">
+    <div
+      data-line-row
+      className={`grid-row-focus rounded-lg border border-border ${tone.border} ${tone.bg}`}
+    >
       <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">
-        <div className="text-xs font-semibold text-muted-foreground tabular">Item {index + 1}</div>
+        <span
+          className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold tabular ${tone.badge}`}
+        >
+          Item {index + 1}
+        </span>
         <button
           type="button"
           tabIndex={-1}
@@ -1548,6 +1565,7 @@ function LineCard({
     </div>
   );
 }
+
 
 function RowRow({ ids, render }: { ids: FieldId[]; render: (id: FieldId) => React.ReactNode }) {
   return <div className="flex flex-wrap gap-2">{ids.map((id) => render(id))}</div>;
