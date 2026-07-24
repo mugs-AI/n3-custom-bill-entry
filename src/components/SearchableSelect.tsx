@@ -236,7 +236,7 @@ export function SearchableSelect({
   };
 
   const searchBox = withPopoverSearch ? (
-    <div className="border-b border-border bg-surface p-2">
+    <div className="sticky top-0 z-10 border-b border-border bg-surface p-2">
       <input
         ref={searchRef}
         type="text"
@@ -256,12 +256,16 @@ export function SearchableSelect({
     </div>
   ) : null;
 
+  // ~7 rows visible: 7 * 32px option + 8px padding.
+  const listMaxHeight = 232;
+
   const listUl = (
     <ul
       id={listId}
       ref={listRef}
       role="listbox"
-      className="max-h-64 overflow-auto"
+      className="overflow-auto"
+      style={{ maxHeight: listMaxHeight }}
     >
       {loading && (
         <li className="px-3 py-2 text-xs text-muted-foreground">Loading…</li>
@@ -277,7 +281,8 @@ export function SearchableSelect({
           id={optId(i)}
           role="option"
           aria-selected={opt.value === value}
-          className={`cursor-pointer px-3 py-1.5 text-sm ${
+          title={opt.hint ? `${opt.label}  ·  ${opt.hint}` : opt.label}
+          className={`flex h-8 cursor-pointer items-center gap-3 px-3 text-sm ${
             i === highlight ? "bg-primary text-primary-foreground" : ""
           }`}
           onMouseEnter={() => setHighlight(i)}
@@ -286,14 +291,17 @@ export function SearchableSelect({
             commit(opt);
           }}
         >
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="font-medium">{opt.label}</span>
-            {opt.hint && (
-              <span className="text-[11px] text-muted-foreground">
-                {opt.hint}
-              </span>
-            )}
-          </div>
+          <span className="min-w-0 flex-1 truncate font-medium">{opt.label}</span>
+          {opt.hint && (
+            <span
+              className={`shrink-0 truncate text-[11px] ${
+                i === highlight ? "text-primary-foreground/80" : "text-muted-foreground"
+              }`}
+              style={{ maxWidth: "40%" }}
+            >
+              {opt.hint}
+            </span>
+          )}
         </li>
       ))}
     </ul>
