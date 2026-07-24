@@ -532,10 +532,10 @@ function BillForm() {
     return t ? `${t.code ?? ""} — ${t.description ?? ""}`.trim() : termLabelDraft;
   }, [termsQ.data, termId, termLabelDraft]);
 
-  // Map: taxCodeId -> numeric rate (%). Prefer the value the N3 Tax Code list
-  // returns on `rate` (or `taxRate` on some tenants). Missing entries default
-  // to 0, which produces tax = 0 without breaking net calculation.
-  const taxRateFromList = useMemo(() => {
+  // Map: taxCodeId -> **rate factor** (0.05 for PT-5%, 0.10 for PT-10%). The
+  // N3 TaxCodeLookupDto.rate is a decimal factor, not a percentage. Missing
+  // entries default to 0, which produces tax = 0 without breaking net math.
+  const taxRateFactorFromList = useMemo(() => {
     const m = new Map<number, number>();
     for (const t of taxCodesQ.data ?? []) {
       const r =
@@ -546,18 +546,20 @@ function BillForm() {
   }, [taxCodesQ.data]);
 
   // Detail fallback for any selected tax code whose list row lacked a rate.
-  const [taxRateDetail, setTaxRateDetail] = useState<Map<number, number>>(() => new Map());
+  const [taxRateFactorDetail, setTaxRateFactorDetail] = useState<Map<number, number>>(
+    () => new Map(),
+  );
   useEffect(() => {
     const selected = new Set<number>();
     for (const l of lines) if (l.taxCodeId != null) selected.add(l.taxCodeId);
     const missing: number[] = [];
     for (const id of selected) {
-      if (!taxRateFromList.has(id) && !taxRateDetail.has(id)) missing.push(id);
+      if (!taxRateFactorFromList.has(id) && !taxRateFactorDetail.has(id)) missing.push(id);
     }
     if (missing.length === 0) return;
     let cancelled = false;
     (async () => {
-      const updates = new Map(taxRateDetail);
+      const updates = new Map(taxRateFactorDetail);
       for (const id of missing) {
         try {
           const d = await n3Call<TaxCodeDetail>(`api/TaxCodes/${id}`);
@@ -568,20 +570,20 @@ function BillForm() {
           updates.set(id, 0);
         }
       }
-      if (!cancelled) setTaxRateDetail(updates);
+      if (!cancelled) setTaxRateFactorDetail(updates);
     })();
     return () => {
       cancelled = true;
     };
-  }, [lines, taxRateFromList, taxRateDetail]);
+  }, [lines, taxRateFactorFromList, taxRateFactorDetail]);
 
-  const rateForLine = useCallback(
+  const rateFactorForLine = useCallback(
     (l: DetailLine): number => {
       if (l.taxCodeId == null) return 0;
-      const r = taxRateFromList.get(l.taxCodeId) ?? taxRateDetail.get(l.taxCodeId);
+      const r = taxRateFactorFromList.get(l.taxCodeId) ?? taxRateFactorDetail.get(l.taxCodeId);
       return typeof r === "number" && Number.isFinite(r) ? r : 0;
     },
-    [taxRateFromList, taxRateDetail],
+    [taxRateFactorFromList, taxRateFactorDetail],
   );
 
   const amountsFor = useCallback(
@@ -589,10 +591,10 @@ function BillForm() {
       computeLine({
         qty: l.qty,
         unitPrice: l.unitPrice,
-        rate: rateForLine(l),
+        rateFactor: rateFactorForLine(l),
         inclusive: isTaxInclusive,
       }),
-    [rateForLine, isTaxInclusive],
+    [rateFactorForLine, isTaxInclusive],
   );
 
   const lineNet = useCallback((l: DetailLine) => amountsFor(l).net, [amountsFor]);
