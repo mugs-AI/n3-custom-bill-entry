@@ -7,7 +7,6 @@ import {
   FIELD_LABELS,
   MAX_PER_ROW,
   coerceLayout,
-  layoutStorageKey,
   loadLayout,
   resetLayout,
   saveLayout,
@@ -29,8 +28,7 @@ export const Route = createFileRoute("/settings")({
       { property: "og:title", content: "Settings · Custom Bill Entry" },
       {
         property: "og:description",
-        content:
-          "Personal item-line layout preferences for the Custom Bill Entry app.",
+        content: "Personal item-line layout preferences for the Custom Bill Entry app.",
       },
     ],
   }),
@@ -41,7 +39,11 @@ function SettingsPage() {
   const hydrated = useHydrated();
   return (
     <AppShell>
-      {hydrated ? <LayoutEditor /> : <div className="app-card p-6 text-sm text-muted-foreground">Loading…</div>}
+      {hydrated ? (
+        <LayoutEditor />
+      ) : (
+        <div className="app-card p-6 text-sm text-muted-foreground">Loading…</div>
+      )}
     </AppShell>
   );
 }
@@ -60,7 +62,6 @@ function LayoutEditor() {
 
   const dirty = useMemo(() => JSON.stringify(saved) !== JSON.stringify(draft), [saved, draft]);
   const validation = useMemo(() => validateLayout(draft), [draft]);
-  const scopeKey = layoutStorageKey();
 
   const rowOf = (id: FieldId): 1 | 2 => (draft.row1.includes(id) ? 1 : 2);
 
@@ -112,12 +113,8 @@ function LayoutEditor() {
       <header>
         <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          This layout preference applies to your current browser and N3 user.
-          Clearing browser data or using another device will restore the default
-          layout.
-        </p>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Storage key: <code className="rounded bg-surface-2 px-1">{scopeKey}</code>
+          This layout preference applies to your current browser and N3 user. Clearing browser data
+          or using another device will restore the default layout.
         </p>
       </header>
 
@@ -146,8 +143,8 @@ function LayoutEditor() {
       <section className="app-card p-4">
         <h2 className="text-sm font-semibold">Item Line Layout</h2>
         <p className="text-[11px] text-muted-foreground">
-          Every one of the 11 fields must appear exactly once. Each row can hold
-          up to {MAX_PER_ROW} fields.
+          Every one of the 11 fields must appear exactly once. Each row can hold up to {MAX_PER_ROW}{" "}
+          fields.
         </p>
         <RowEditor
           label={`Row 1 (${draft.row1.length}/${MAX_PER_ROW})`}
@@ -184,12 +181,7 @@ function LayoutEditor() {
         >
           Save Layout
         </button>
-        <button
-          type="button"
-          className="app-btn"
-          disabled={!dirty}
-          onClick={onCancel}
-        >
+        <button type="button" className="app-btn" disabled={!dirty} onClick={onCancel}>
           Cancel Unsaved Changes
         </button>
         <button type="button" className="app-btn" onClick={onReset}>
@@ -237,13 +229,8 @@ function RowEditor({
       </div>
       <ul className="mt-1 flex flex-col divide-y divide-border rounded-md border border-border">
         {fields.map((id, i) => (
-          <li
-            key={id}
-            className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
-          >
-            <span className="w-6 text-right text-xs text-muted-foreground tabular">
-              {i + 1}.
-            </span>
+          <li key={id} className="flex flex-wrap items-center gap-2 px-3 py-2 text-sm">
+            <span className="w-6 text-right text-xs text-muted-foreground tabular">{i + 1}.</span>
             <span className="font-medium">{FIELD_LABELS[id]}</span>
             <div className="ml-auto flex items-center gap-1">
               <button

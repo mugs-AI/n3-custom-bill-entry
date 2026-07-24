@@ -46,10 +46,7 @@ function buildQuery(query?: N3RequestInit["query"]): string {
   return s ? `?${s}` : "";
 }
 
-export async function n3Call<T = unknown>(
-  path: string,
-  init: N3RequestInit = {},
-): Promise<T> {
+export async function n3Call<T = unknown>(path: string, init: N3RequestInit = {}): Promise<T> {
   const token = getToken();
   if (!token) {
     throw new N3Error("Not signed in to N3. Please connect first.", { code: "NO_TOKEN" });

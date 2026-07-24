@@ -56,6 +56,13 @@ export interface SearchableSelectProps {
   withPopoverSearch?: boolean;
   /** Shown as an empty-state hint when options.length === 0 and !loading. */
   emptyMessage?: string;
+  /**
+   * Minimum popover width in CSS pixels. Applies only when popoverPortal is
+   * true. Clamped to the viewport so the popover always stays on screen.
+   * Used to give Supplier/WBS/GL dropdowns enough room to render one-line
+   * option labels without truncation.
+   */
+  minPopoverWidth?: number;
 }
 
 export function SearchableSelect({
@@ -73,6 +80,7 @@ export function SearchableSelect({
   compact,
   withPopoverSearch,
   emptyMessage,
+  minPopoverWidth,
 }: SearchableSelectProps) {
   const listId = useId();
   const optId = (i: number) => `${listId}-opt-${i}`;
@@ -138,11 +146,18 @@ export function SearchableSelect({
       const el = inputRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
+      const vw = window.innerWidth || 1280;
+      const margin = 12;
+      const requested = Math.max(r.width, minPopoverWidth ?? 260);
+      const maxWidth = Math.max(240, vw - margin * 2);
+      const width = Math.min(requested, maxWidth);
+      let left = r.left;
+      if (left + width > vw - margin) left = Math.max(margin, vw - margin - width);
       setPopStyle({
         position: "fixed",
         top: Math.round(r.bottom + 4),
-        left: Math.round(r.left),
-        width: Math.round(Math.max(r.width, 260)),
+        left: Math.round(left),
+        width: Math.round(width),
         zIndex: 60,
       });
     };
@@ -153,7 +168,7 @@ export function SearchableSelect({
       window.removeEventListener("scroll", update, true);
       window.removeEventListener("resize", update);
     };
-  }, [open, popoverPortal, filtered.length]);
+  }, [open, popoverPortal, filtered.length, minPopoverWidth]);
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -221,7 +236,7 @@ export function SearchableSelect({
   };
 
   const searchBox = withPopoverSearch ? (
-    <div className="border-b border-border bg-surface p-2">
+    <div className="sticky top-0 z-10 border-b border-border bg-surface p-2">
       <input
         ref={searchRef}
         type="text"
@@ -241,16 +256,18 @@ export function SearchableSelect({
     </div>
   ) : null;
 
+  // ~7 rows visible: 7 * 32px option + 8px padding.
+  const listMaxHeight = 232;
+
   const listUl = (
     <ul
       id={listId}
       ref={listRef}
       role="listbox"
-      className="max-h-64 overflow-auto"
+      className="overflow-auto"
+      style={{ maxHeight: listMaxHeight }}
     >
-      {loading && (
-        <li className="px-3 py-2 text-xs text-muted-foreground">Loading…</li>
-      )}
+      {loading && <li className="px-3 py-2 text-xs text-muted-foreground">Loading…</li>}
       {!loading && filtered.length === 0 && (
         <li className="px-3 py-2 text-xs text-muted-foreground">
           {options.length === 0 && emptyMessage ? emptyMessage : "No matches"}
@@ -262,7 +279,8 @@ export function SearchableSelect({
           id={optId(i)}
           role="option"
           aria-selected={opt.value === value}
-          className={`cursor-pointer px-3 py-1.5 text-sm ${
+          title={opt.hint ? `${opt.label}  ·  ${opt.hint}` : opt.label}
+          className={`flex h-8 cursor-pointer items-center gap-3 px-3 text-sm ${
             i === highlight ? "bg-primary text-primary-foreground" : ""
           }`}
           onMouseEnter={() => setHighlight(i)}
@@ -271,14 +289,17 @@ export function SearchableSelect({
             commit(opt);
           }}
         >
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="font-medium">{opt.label}</span>
-            {opt.hint && (
-              <span className="text-[11px] text-muted-foreground">
-                {opt.hint}
-              </span>
-            )}
-          </div>
+          <span className="min-w-0 flex-1 truncate font-medium">{opt.label}</span>
+          {opt.hint && (
+            <span
+              className={`shrink-0 truncate text-[11px] ${
+                i === highlight ? "text-primary-foreground/80" : "text-muted-foreground"
+              }`}
+              style={{ maxWidth: "40%" }}
+            >
+              {opt.hint}
+            </span>
+          )}
         </li>
       ))}
     </ul>
@@ -308,9 +329,7 @@ export function SearchableSelect({
         aria-controls={listId}
         aria-autocomplete={withPopoverSearch ? "none" : "list"}
         aria-label={ariaLabel}
-        aria-activedescendant={
-          open && filtered[highlight] ? optId(highlight) : undefined
-        }
+        aria-activedescendant={open && filtered[highlight] ? optId(highlight) : undefined}
         readOnly={withPopoverSearch}
         className={compact ? "app-input h-8 px-2 py-1 text-[13px]" : "app-input"}
         placeholder={placeholder}

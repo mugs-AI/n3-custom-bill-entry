@@ -57,9 +57,7 @@ export function decodeJwt(token: string): Record<string, unknown> | null {
     if (!payload) return null;
     const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
     const json =
-      typeof atob === "function"
-        ? atob(b64)
-        : Buffer.from(b64, "base64").toString("utf8");
+      typeof atob === "function" ? atob(b64) : Buffer.from(b64, "base64").toString("utf8");
     return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;

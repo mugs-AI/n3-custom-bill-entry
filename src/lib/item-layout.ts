@@ -60,10 +60,7 @@ export const DEFAULT_LAYOUT: ItemLayout = {
 
 export const LAYOUT_EVENT = "custom-bill-entry:item-layout-change";
 
-function pickClaim(
-  p: Record<string, unknown> | null,
-  keys: string[],
-): string | null {
+function pickClaim(p: Record<string, unknown> | null, keys: string[]): string | null {
   if (!p) return null;
   for (const k of keys) {
     const v = p[k];
@@ -78,11 +75,9 @@ export function getLayoutScope(): { tenantId: string; userId: string } {
   const t = getToken();
   const payload = t ? decodeJwt(t) : null;
   const tenantId =
-    pickClaim(payload, ["tid", "tenantId", "tenant_id", "dbcode", "dbCode", "dbId"]) ??
-    "unknown";
+    pickClaim(payload, ["tid", "tenantId", "tenant_id", "dbcode", "dbCode", "dbId"]) ?? "unknown";
   const userId =
-    pickClaim(payload, ["sub", "uid", "userId", "user_id", "nameid", "oid"]) ??
-    "unknown";
+    pickClaim(payload, ["sub", "uid", "userId", "user_id", "nameid", "oid"]) ?? "unknown";
   return { tenantId, userId };
 }
 
@@ -110,18 +105,30 @@ export function coerceLayout(raw: unknown): ItemLayout {
   const seen = new Set<FieldId>();
   const row1: FieldId[] = [];
   const row2: FieldId[] = [];
-  for (const id of r1) if (!seen.has(id) && row1.length < MAX_PER_ROW) {
-    seen.add(id); row1.push(id);
-  }
-  for (const id of r2) if (!seen.has(id) && row2.length < MAX_PER_ROW) {
-    seen.add(id); row2.push(id);
-  }
+  for (const id of r1)
+    if (!seen.has(id) && row1.length < MAX_PER_ROW) {
+      seen.add(id);
+      row1.push(id);
+    }
+  for (const id of r2)
+    if (!seen.has(id) && row2.length < MAX_PER_ROW) {
+      seen.add(id);
+      row2.push(id);
+    }
   // append missing fields
   const defaults = [...DEFAULT_LAYOUT.row1, ...DEFAULT_LAYOUT.row2];
   for (const id of defaults) {
     if (seen.has(id)) continue;
-    if (row2.length < MAX_PER_ROW) { row2.push(id); seen.add(id); continue; }
-    if (row1.length < MAX_PER_ROW) { row1.push(id); seen.add(id); continue; }
+    if (row2.length < MAX_PER_ROW) {
+      row2.push(id);
+      seen.add(id);
+      continue;
+    }
+    if (row1.length < MAX_PER_ROW) {
+      row1.push(id);
+      seen.add(id);
+      continue;
+    }
     // both full — shouldn't happen with 11 fields / max 6 per row
   }
   if (row1.length === 0 || row2.length === 0) return { ...DEFAULT_LAYOUT };
@@ -143,9 +150,7 @@ export function validateLayout(l: ItemLayout): LayoutValidation {
   }
   const missing = FIELD_IDS.filter((id) => !dupSet.has(id));
   if (missing.length) {
-    errors.push(
-      `Missing: ${missing.map((id) => FIELD_LABELS[id]).join(", ")}`,
-    );
+    errors.push(`Missing: ${missing.map((id) => FIELD_LABELS[id]).join(", ")}`);
   }
   if (l.row1.length === 0) errors.push("Row 1 needs at least one field");
   if (l.row2.length === 0) errors.push("Row 2 needs at least one field");
@@ -158,7 +163,11 @@ export function validateLayout(l: ItemLayout): LayoutValidation {
 
 function safeStorage(): Storage | null {
   if (typeof window === "undefined") return null;
-  try { return window.localStorage; } catch { return null; }
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
 }
 
 export function loadLayout(): ItemLayout {
@@ -179,7 +188,9 @@ export function saveLayout(l: ItemLayout): void {
   try {
     s.setItem(layoutStorageKey(), JSON.stringify({ ...l, schemaVersion: LAYOUT_SCHEMA_VERSION }));
     window.dispatchEvent(new Event(LAYOUT_EVENT));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 export function resetLayout(): void {
@@ -188,5 +199,7 @@ export function resetLayout(): void {
   try {
     s.removeItem(layoutStorageKey());
     window.dispatchEvent(new Event(LAYOUT_EVENT));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
