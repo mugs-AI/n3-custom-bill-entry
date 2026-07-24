@@ -247,15 +247,32 @@ function BillForm() {
     }
   }, [supplierId]);
 
-  const supplierOptions: ComboOption[] = useMemo(
-    () =>
-      (suppliersQ.data ?? []).map((s) => ({
-        value: String(s.id),
-        label: `${s.code ?? ""} — ${s.name ?? ""}`.trim(),
-        hint: s.termCode ?? undefined,
-      })),
-    [suppliersQ.data],
+  // Case-insensitive, numeric-aware collator so "800-M002" sorts after
+  // "800-M009" the way a human expects, and names like "eastcom" / "EASTCOM"
+  // compare equal for ordering.
+  const collator = useMemo(
+    () => new Intl.Collator(undefined, { sensitivity: "base", numeric: true }),
+    [],
   );
+
+  const supplierOptions: ComboOption[] = useMemo(() => {
+    const rows = (suppliersQ.data ?? []).slice();
+    // Sort by Supplier Name asc, Supplier Code tie-break, empty names last.
+    rows.sort((a, b) => {
+      const an = (a.name ?? "").trim();
+      const bn = (b.name ?? "").trim();
+      if (!an && bn) return 1;
+      if (an && !bn) return -1;
+      const byName = collator.compare(an, bn);
+      if (byName !== 0) return byName;
+      return collator.compare(a.code ?? "", b.code ?? "");
+    });
+    return rows.map((s) => ({
+      value: String(s.id),
+      label: `${s.code ?? ""} — ${s.name ?? ""}`.trim(),
+      hint: s.termCode ?? undefined,
+    }));
+  }, [suppliersQ.data, collator]);
 
   const purchaserOptions: ComboOption[] = useMemo(
     () =>
@@ -277,19 +294,42 @@ function BillForm() {
     [termsQ.data],
   );
 
-  const detail = supplierDetailQ.data ?? null;
+  // Fallback view = the row from the /Suppliers/List response for the
+  // currently-selected id. This lets Name/Address/Phone/Email/Contact/Term
+  // Code appear IMMEDIATELY on selection — the /Suppliers/{id} enrichment
+  // only overwrites or fills in properties the list DTO doesn't carry
+  // (termId, full Term relation, eInvoiceEmail, emailList).
+  const listSupplier = useMemo<SupplierList | null>(() => {
+    if (supplierId == null) return null;
+    return (suppliersQ.data ?? []).find((s) => s.id === supplierId) ?? null;
+  }, [suppliersQ.data, supplierId]);
+
+  // Guard against a stale detail response overwriting a newer selection.
+  // react-query keys by supplierId already, but defensively verify.
+  const detail: SupplierDetail | null =
+    supplierDetailQ.data && supplierDetailQ.data.id === supplierId
+      ? supplierDetailQ.data
+      : null;
+
+  // Merge: prefer detail fields when present, otherwise fall back to list.
+  const supplierView = detail ?? listSupplier;
   const addressLines = [
-    detail?.address1,
-    detail?.address2,
-    detail?.address3,
-    detail?.address4,
+    supplierView?.address1,
+    supplierView?.address2,
+    supplierView?.address3,
+    supplierView?.address4,
   ]
     .map((s) => (s ?? "").trim())
     .filter((s) => s.length > 0);
 
-  const email = pickEmail(detail);
-  const phone = detail?.phoneNo1 ?? "";
-  const contact = detail?.contactPerson ?? "";
+  const email = pickEmail(detail) || (listSupplier?.email ?? "");
+  const phone = supplierView?.phoneNo1 ?? "";
+  const contact = supplierView?.contactPerson ?? "";
+  const supplierName = supplierView?.name ?? "";
+  const supplierLabel = listSupplier
+    ? `${listSupplier.code ?? ""} — ${listSupplier.name ?? ""}`.trim()
+    : "";
+  const enriching = supplierId != null && supplierDetailQ.isFetching;
 
   const totalNet = useMemo(
     () =>
