@@ -1565,8 +1565,14 @@ function FieldCell({
   const medClass = "min-w-[180px] flex-[1.5_1_180px]";
   const narrowClass = "min-w-[110px] flex-1";
 
+  const fieldKey = `line:${line.key}:${id}`;
+  const isInvalid = ctx.invalidFields.has(fieldKey);
+
   const wrap = (widthClass: string, content: React.ReactNode) => (
-    <div className={widthClass}>
+    <div
+      className={`${widthClass} ${isInvalid ? "rounded-md ring-2 ring-destructive/60 ring-offset-1" : ""}`}
+      data-field={fieldKey}
+    >
       <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
         {FIELD_LABELS[id]}
       </div>
@@ -1574,6 +1580,7 @@ function FieldCell({
       {error && <FieldError text={error} />}
     </div>
   );
+
 
   const { onChange } = ctx;
 
