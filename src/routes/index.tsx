@@ -752,8 +752,10 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
   useEffect(() => {
     if (save.status === "success") return; // do not resurrect a saved bill
     const draft: BillDraft = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       savedAt: Date.now(),
+      invoiceId,
+      docCode: editedDocCode || null,
       docDate,
       supplierId,
       supplierLabel: supplierLabel || supplierLabelDraft,
@@ -769,6 +771,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
       lines: lines.map(
         (l): DraftLine => ({
           key: l.key,
+          n3Id: l.n3Id ?? null,
           stockId: l.stockId,
           stockCode: l.stockCode,
           stockName: l.stockName,
@@ -794,7 +797,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
         }),
       ),
     };
-    saveDraft(draft);
+    saveDraft(draft, draftScope);
   }, [
     docDate,
     supplierId,
@@ -813,13 +816,16 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
     isTaxInclusive,
     lines,
     save.status,
+    draftScope,
+    invoiceId,
+    editedDocCode,
   ]);
 
   // If the auth scope shifts (tenant/user swap) while this page is mounted,
   // drop the old draft key we captured at mount so it doesn't linger.
   useEffect(() => {
     const check = () => {
-      const now = draftStorageKey();
+      const now = draftStorageKey(draftScope);
       if (now !== draftScopeAtMount.current) {
         try {
           window.sessionStorage.removeItem(draftScopeAtMount.current);
@@ -835,10 +841,10 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
       window.removeEventListener("qne-auth-change", check);
       window.removeEventListener("storage", check);
     };
-  }, []);
+  }, [draftScope]);
 
   const resetForm = useCallback(() => {
-    clearDraft();
+    clearDraft(draftScope);
     setDocDate(todayISOInKL());
     setSupplierId(null);
     setSupplierLabelDraft("");
@@ -853,10 +859,10 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
     setIsTaxInclusive(false);
     setLines([emptyLine()]);
     setSave({ status: "idle" });
-  }, []);
+  }, [draftScope]);
 
   const onReset = () => {
-    if (window.confirm("Clear all entered values and start a new bill?")) resetForm();
+    if (window.confirm(isEdit ? "Discard changes to this Purchase Invoice?" : "Clear all entered values and start a new bill?")) resetForm();
   };
 
   // ==================== Save to N3 =========================================
