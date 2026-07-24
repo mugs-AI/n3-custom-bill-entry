@@ -1093,9 +1093,9 @@ function BillForm() {
               value="Assigned on save"
             />
           </div>
-          <div>
+          <div data-field="docDate">
             <label className="app-label" htmlFor="doc-date">
-              Document Date
+              Document Date <span className="text-destructive">*</span>
             </label>
             <MyDateInput
               id="doc-date"
@@ -1105,7 +1105,8 @@ function BillForm() {
               required
             />
           </div>
-          <div>
+          <div data-field="supplier">
+
             <label className="app-label">Supplier</label>
             <SearchableSelect
               options={supplierOptions}
