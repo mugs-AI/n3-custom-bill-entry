@@ -1296,7 +1296,15 @@ function BillForm() {
   );
 }
 
-function SuccessPanel({ docCode, onNew }: { docCode: string; onNew: () => void }) {
+function SuccessPanel({
+  docCode,
+  onNew,
+  navigate,
+}: {
+  docCode: string;
+  onNew: () => void;
+  navigate: ReturnType<typeof useNavigate>;
+}) {
   return (
     <div className="app-card mx-auto max-w-xl p-6 text-center">
       <div
@@ -1308,9 +1316,16 @@ function SuccessPanel({ docCode, onNew }: { docCode: string; onNew: () => void }
       <h1 className="text-lg font-semibold">Purchase Invoice created in N3</h1>
       <p className="mt-2 text-sm text-muted-foreground">N3 assigned document number</p>
       <p className="mt-1 text-2xl font-semibold tabular tracking-tight">{docCode}</p>
-      <div className="mt-5 flex items-center justify-center gap-2">
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
         <button type="button" className="app-btn app-btn-primary" onClick={onNew}>
           Create Another Bill
+        </button>
+        <button
+          type="button"
+          className="app-btn"
+          onClick={() => navigate({ to: "/history", search: { q: docCode } })}
+        >
+          View in History
         </button>
       </div>
     </div>
