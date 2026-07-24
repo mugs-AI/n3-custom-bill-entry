@@ -50,6 +50,8 @@ interface CreatePayload {
     description: string;
     qty: number;
     unitPrice: number;
+    /** Decimal factor from N3 TaxCodeLookupDto.rate (0.05 for PT-5%). */
+    taxRateFactor: number;
     referenceNo: string;
   }>;
 }
