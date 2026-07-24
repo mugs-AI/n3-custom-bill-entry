@@ -999,6 +999,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
         return;
       }
       const body = {
+        ...(isEdit && invoiceId ? { invoiceId } : {}),
         header: {
           supplierId,
           docDate,
@@ -1010,6 +1011,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
           isTaxInclusive,
         },
         lines: lines.map((l) => ({
+          ...(isEdit && l.n3Id ? { n3Id: l.n3Id } : {}),
           stockId: l.stockId,
           uomId: l.uomId,
           glAccountId: l.glAccountId,
@@ -1025,7 +1027,8 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
           referenceNo: l.refNo,
         })),
       };
-      const res = await fetch("/api/bills/create", {
+      const endpoint = isEdit ? "/api/bills/update" : "/api/bills/create";
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` },
         body: JSON.stringify(body),
@@ -1038,14 +1041,20 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
         kind?: string;
       };
       if (res.ok && d.ok && d.docCode) {
-        clearDraft();
-        // Invalidate History cache so the new invoice appears immediately.
+        clearDraft(draftScope);
         try {
           queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY });
+          if (isEdit && invoiceId) {
+            queryClient.invalidateQueries({ queryKey: ["n3", "purchaseInvoice", invoiceId] });
+          }
         } catch {
           /* best effort */
         }
-        setSave({ status: "success", docCode: d.docCode, message: "Saved to N3" });
+        setSave({
+          status: "success",
+          docCode: d.docCode,
+          message: isEdit ? "Updated in N3" : "Saved to N3",
+        });
       } else {
         setSave({
           status: "error",
@@ -1066,7 +1075,14 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
   };
 
   if (save.status === "success" && save.docCode) {
-    return <SuccessPanel docCode={save.docCode} onNew={resetForm} navigate={navigate} />;
+    return (
+      <SuccessPanel
+        docCode={save.docCode}
+        mode={mode}
+        onNew={resetForm}
+        navigate={navigate}
+      />
+    );
   }
 
   return (
