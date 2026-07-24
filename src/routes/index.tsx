@@ -415,6 +415,7 @@ function BillForm() {
             <SearchableSelect
               options={supplierOptions}
               value={supplierId != null ? String(supplierId) : null}
+              selectedLabel={supplierLabel}
               onChange={(o) => setSupplierId(o ? Number(o.value) : null)}
               loading={suppliersQ.isLoading}
               placeholder={
@@ -422,6 +423,11 @@ function BillForm() {
               }
               ariaLabel="Supplier"
             />
+            {enriching && (
+              <p className="mt-1 text-[11px] text-muted-foreground" role="status">
+                Loading full supplier details…
+              </p>
+            )}
           </div>
 
           <div className="md:col-span-2">
@@ -429,7 +435,7 @@ function BillForm() {
             <input
               className="app-input"
               readOnly
-              value={detail?.name ?? ""}
+              value={supplierName}
             />
           </div>
           <div>
@@ -453,9 +459,7 @@ function BillForm() {
               role="group"
               aria-label="Supplier Address"
             >
-              {supplierDetailQ.isLoading && supplierId != null ? (
-                <span className="text-muted-foreground">Loading…</span>
-              ) : addressLines.length ? (
+              {addressLines.length ? (
                 addressLines.join("\n")
               ) : (
                 ""
