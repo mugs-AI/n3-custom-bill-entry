@@ -157,6 +157,14 @@ function coercePayload(raw: unknown): CreatePayload | { error: string } {
     if (!isFiniteNumber(unitPrice) || unitPrice < 0)
       return { error: `Line ${i + 1}: Unit Price must be ≥ 0` };
 
+    // Rate factor: N3 returns decimal (0.05 for PT-5%). Reject unrealistic
+    // values so a broken client can't post 500%+ tax.
+    const rawRateFactor = (l as Record<string, unknown>).taxRateFactor;
+    const taxRateFactor =
+      isFiniteNumber(rawRateFactor) && rawRateFactor >= 0 && rawRateFactor <= 1
+        ? rawRateFactor
+        : 0;
+
     outLines.push({
       stockId,
       uomId,
@@ -167,6 +175,7 @@ function coercePayload(raw: unknown): CreatePayload | { error: string } {
       description,
       qty,
       unitPrice,
+      taxRateFactor,
       referenceNo: typeof l.referenceNo === "string" ? l.referenceNo.trim() : "",
     });
   }
