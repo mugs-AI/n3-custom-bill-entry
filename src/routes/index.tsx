@@ -534,7 +534,8 @@ function BillForm() {
   const taxRateFromList = useMemo(() => {
     const m = new Map<number, number>();
     for (const t of taxCodesQ.data ?? []) {
-      const r = typeof t.rate === "number" ? t.rate : typeof t.taxRate === "number" ? t.taxRate : undefined;
+      const r =
+        typeof t.rate === "number" ? t.rate : typeof t.taxRate === "number" ? t.taxRate : undefined;
       if (r != null && Number.isFinite(r)) m.set(t.id, r);
     }
     return m;
@@ -557,11 +558,7 @@ function BillForm() {
         try {
           const d = await n3Call<TaxCodeDetail>(`api/TaxCodes/${id}`);
           const r =
-            typeof d?.rate === "number"
-              ? d.rate
-              : typeof d?.taxRate === "number"
-                ? d.taxRate
-                : 0;
+            typeof d?.rate === "number" ? d.rate : typeof d?.taxRate === "number" ? d.taxRate : 0;
           updates.set(id, Number.isFinite(r) ? r : 0);
         } catch {
           updates.set(id, 0);
@@ -989,7 +986,6 @@ function BillForm() {
     }
   };
 
-
   if (save.status === "success" && save.docCode) {
     return <SuccessPanel docCode={save.docCode} onNew={resetForm} />;
   }
@@ -1053,8 +1049,7 @@ function BillForm() {
           className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm"
           role="status"
         >
-          <strong>Still loading:</strong>{" "}
-          {blockingReasons.join(" · ")}
+          <strong>Still loading:</strong> {blockingReasons.join(" · ")}
         </div>
       )}
 
@@ -1106,7 +1101,6 @@ function BillForm() {
             />
           </div>
           <div data-field="supplier">
-
             <label className="app-label">Supplier</label>
             <SearchableSelect
               options={supplierOptions}
@@ -1176,7 +1170,6 @@ function BillForm() {
             <input className="app-input" readOnly value={email} />
           </div>
           <div data-field="term">
-
             <label className="app-label">
               Term <span className="text-destructive">*</span>
             </label>
@@ -1228,7 +1221,6 @@ function BillForm() {
               aria-invalid={invalidFields.has("supplierInvNo") || undefined}
             />
           </div>
-
 
           <div className="md:col-span-3 mt-1 flex items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-2">
             <label
@@ -1283,7 +1275,6 @@ function BillForm() {
         onStockSelect={handleStockSelect}
         onGlSelect={handleGlSelect}
       />
-
     </form>
   );
 }
@@ -1370,7 +1361,6 @@ interface LineCtx {
   lineNet: (l: DetailLine) => number;
   lineTax: (l: DetailLine) => number;
   invalidFields: Set<string>;
-
 }
 
 function LineList({
@@ -1473,14 +1463,15 @@ function LineList({
           </div>
           <div className="mt-1 flex items-center justify-between border-t border-border pt-1">
             <span className="text-xs font-bold uppercase">Grand Total (MYR)</span>
-            <span className="tabular text-base font-semibold">{formatMoney(totals.grandTotal)}</span>
+            <span className="tabular text-base font-semibold">
+              {formatMoney(totals.grandTotal)}
+            </span>
           </div>
         </div>
       </div>
     </div>
   );
 }
-
 
 function LineCard({
   line,
@@ -1535,9 +1526,21 @@ function LineCard({
   // an explicit "Item N" header + numeric badge so users don't rely on colour.
   const palette = [
     { bg: "bg-[#f8fbff]", border: "border-l-4 border-l-sky-400", badge: "bg-sky-100 text-sky-800" },
-    { bg: "bg-[#f6fbf7]", border: "border-l-4 border-l-emerald-400", badge: "bg-emerald-100 text-emerald-800" },
-    { bg: "bg-[#fffaf3]", border: "border-l-4 border-l-amber-400", badge: "bg-amber-100 text-amber-800" },
-    { bg: "bg-[#fbf7ff]", border: "border-l-4 border-l-violet-400", badge: "bg-violet-100 text-violet-800" },
+    {
+      bg: "bg-[#f6fbf7]",
+      border: "border-l-4 border-l-emerald-400",
+      badge: "bg-emerald-100 text-emerald-800",
+    },
+    {
+      bg: "bg-[#fffaf3]",
+      border: "border-l-4 border-l-amber-400",
+      badge: "bg-amber-100 text-amber-800",
+    },
+    {
+      bg: "bg-[#fbf7ff]",
+      border: "border-l-4 border-l-violet-400",
+      badge: "bg-violet-100 text-violet-800",
+    },
   ];
   const tone = palette[index % palette.length];
 
@@ -1571,7 +1574,6 @@ function LineCard({
   );
 }
 
-
 function RowRow({ ids, render }: { ids: FieldId[]; render: (id: FieldId) => React.ReactNode }) {
   return <div className="flex flex-wrap gap-2">{ids.map((id) => render(id))}</div>;
 }
@@ -1603,7 +1605,6 @@ function FieldCell({
       {error && <FieldError text={error} />}
     </div>
   );
-
 
   const { onChange } = ctx;
 
