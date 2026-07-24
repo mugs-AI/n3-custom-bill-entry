@@ -14,7 +14,9 @@ import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as DevLoginRouteImport } from './routes/dev-login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PurchaseInvoicesIdEditRouteImport } from './routes/purchase-invoices.$id.edit'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
+import { Route as ApiBillsUpdateRouteImport } from './routes/api/bills/update'
 import { Route as ApiBillsCreateRouteImport } from './routes/api/bills/create'
 import { Route as ApiAuthDevConnectRouteImport } from './routes/api/auth/dev-connect'
 
@@ -43,9 +45,19 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PurchaseInvoicesIdEditRoute = PurchaseInvoicesIdEditRouteImport.update({
+  id: '/purchase-invoices/$id/edit',
+  path: '/purchase-invoices/$id/edit',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiProxySplatRoute = ApiProxySplatRouteImport.update({
   id: '/api/proxy/$',
   path: '/api/proxy/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBillsUpdateRoute = ApiBillsUpdateRouteImport.update({
+  id: '/api/bills/update',
+  path: '/api/bills/update',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiBillsCreateRoute = ApiBillsCreateRouteImport.update({
@@ -67,7 +79,9 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/bills/create': typeof ApiBillsCreateRoute
+  '/api/bills/update': typeof ApiBillsUpdateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
+  '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -77,7 +91,9 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/bills/create': typeof ApiBillsCreateRoute
+  '/api/bills/update': typeof ApiBillsUpdateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
+  '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -88,7 +104,9 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/bills/create': typeof ApiBillsCreateRoute
+  '/api/bills/update': typeof ApiBillsUpdateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
+  '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -100,7 +118,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/api/auth/dev-connect'
     | '/api/bills/create'
+    | '/api/bills/update'
     | '/api/proxy/$'
+    | '/purchase-invoices/$id/edit'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -110,7 +130,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/api/auth/dev-connect'
     | '/api/bills/create'
+    | '/api/bills/update'
     | '/api/proxy/$'
+    | '/purchase-invoices/$id/edit'
   id:
     | '__root__'
     | '/'
@@ -120,7 +142,9 @@ export interface FileRouteTypes {
     | '/settings'
     | '/api/auth/dev-connect'
     | '/api/bills/create'
+    | '/api/bills/update'
     | '/api/proxy/$'
+    | '/purchase-invoices/$id/edit'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -131,7 +155,9 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   ApiAuthDevConnectRoute: typeof ApiAuthDevConnectRoute
   ApiBillsCreateRoute: typeof ApiBillsCreateRoute
+  ApiBillsUpdateRoute: typeof ApiBillsUpdateRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
+  PurchaseInvoicesIdEditRoute: typeof PurchaseInvoicesIdEditRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -171,11 +197,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/purchase-invoices/$id/edit': {
+      id: '/purchase-invoices/$id/edit'
+      path: '/purchase-invoices/$id/edit'
+      fullPath: '/purchase-invoices/$id/edit'
+      preLoaderRoute: typeof PurchaseInvoicesIdEditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/proxy/$': {
       id: '/api/proxy/$'
       path: '/api/proxy/$'
       fullPath: '/api/proxy/$'
       preLoaderRoute: typeof ApiProxySplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/bills/update': {
+      id: '/api/bills/update'
+      path: '/api/bills/update'
+      fullPath: '/api/bills/update'
+      preLoaderRoute: typeof ApiBillsUpdateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/bills/create': {
@@ -203,18 +243,10 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   ApiAuthDevConnectRoute: ApiAuthDevConnectRoute,
   ApiBillsCreateRoute: ApiBillsCreateRoute,
+  ApiBillsUpdateRoute: ApiBillsUpdateRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
+  PurchaseInvoicesIdEditRoute: PurchaseInvoicesIdEditRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

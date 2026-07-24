@@ -292,14 +292,37 @@ function initialFormFromDraft(d: BillDraft | null) {
   };
 }
 
-function BillForm() {
+export interface BillFormProps {
+  /** Defaults to "create". "edit" wires the form to /api/bills/update. */
+  mode?: "create" | "edit";
+  /**
+   * Pre-populated draft when editing an existing PI. Must carry invoiceId
+   * and docCode. Used only on first render; further edits go to a per-invoice
+   * sessionStorage draft key.
+   */
+  editInvoice?: BillDraft | null;
+}
+
+export function BillForm({ mode = "create", editInvoice = null }: BillFormProps = {}) {
   const layout = useItemLayout();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  // Draft is loaded once at mount (client only). Storage-key changes (tenant/
-  // user swap) are handled by clearing at auth boundaries.
-  const initial = useMemo(() => initialFormFromDraft(loadDraft()), []);
-  const draftScopeAtMount = useRef<string>(draftStorageKey());
+  const isEdit = mode === "edit";
+  const invoiceId = isEdit ? (editInvoice?.invoiceId ?? null) : null;
+  const editedDocCode = isEdit ? (editInvoice?.docCode ?? "") : "";
+  const draftScope = useMemo<import("@/lib/draft-store").DraftScope>(
+    () => (isEdit && invoiceId ? { kind: "edit", invoiceId } : "new"),
+    [isEdit, invoiceId],
+  );
+  // Draft is loaded once at mount (client only). In edit mode the loaded
+  // invoice is the base; a per-invoice session draft (if any) wins over it so
+  // in-flight edits survive reload.
+  const initial = useMemo(
+    () => initialFormFromDraft(loadDraft(draftScope) ?? (isEdit ? editInvoice : null)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const draftScopeAtMount = useRef<string>(draftStorageKey(draftScope));
 
   const [docDate, setDocDate] = useState(initial.docDate);
   const [supplierId, setSupplierId] = useState<number | null>(initial.supplierId);
