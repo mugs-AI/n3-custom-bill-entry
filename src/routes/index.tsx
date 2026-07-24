@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import * as React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { SearchableSelect, type ComboOption } from "@/components/SearchableSelect";
 import { MyDateInput } from "@/components/MyDateInput";
@@ -20,6 +20,7 @@ import {
   type BillDraft,
   type DraftLine,
 } from "@/lib/draft-store";
+import { HISTORY_QUERY_KEY } from "@/lib/history-query";
 
 export const Route = createFileRoute("/")({
   head: () => ({
