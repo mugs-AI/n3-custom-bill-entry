@@ -115,7 +115,7 @@ interface TaxCode {
   isActive?: boolean;
   inactive?: boolean;
 }
-interface TaxCodeDetail extends TaxCode {}
+type TaxCodeDetail = TaxCode;
 interface TariffCode {
   id: number;
   code?: string;
