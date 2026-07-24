@@ -129,6 +129,8 @@ interface TariffCode {
 
 interface DetailLine {
   key: string;
+  /** N3 PurchaseInvoiceDetailDto.id — set only for lines loaded in edit mode. */
+  n3Id?: string | null;
   stockId: number | null;
   stockCode: string;
   stockName: string;
@@ -275,6 +277,37 @@ function initialFormFromDraft(d: BillDraft | null) {
       lines: [emptyLine()],
     };
   }
+  const lines = d.lines.map(
+    (l): DetailLine => ({
+      key: l.key,
+      // n3Id is DraftLine-only metadata that stays on DetailLine for edit-mode
+      // Update payloads.
+      ...(l.n3Id ? { n3Id: l.n3Id } : {}),
+      stockId: l.stockId,
+      stockCode: l.stockCode,
+      stockName: l.stockName,
+      itemDescription: l.itemDescription,
+      itemDescriptionTouched: l.itemDescriptionTouched,
+      uomId: l.uomId,
+      uomCode: l.uomCode,
+      uomError: null,
+      glAccountId: l.glAccountId,
+      glAccountCode: l.glAccountCode,
+      glAccountName: l.glAccountName,
+      projectId: l.projectId,
+      projectCode: l.projectCode,
+      projectName: l.projectName,
+      taxCodeId: l.taxCodeId,
+      taxCodeCode: l.taxCodeCode,
+      taxCodeName: l.taxCodeName,
+      tariffCodeId: l.tariffCodeId,
+      tariffCodeCode: l.tariffCodeCode,
+      tariffCodeName: l.tariffCodeName,
+      qty: l.qty,
+      unitPrice: l.unitPrice,
+      refNo: l.refNo,
+    }),
+  );
   return {
     docDate: d.docDate || todayISOInKL(),
     supplierId: d.supplierId,
@@ -288,18 +321,41 @@ function initialFormFromDraft(d: BillDraft | null) {
     referenceNo: d.referenceNo,
     supplierInvNo: d.supplierInvNo,
     isTaxInclusive: d.isTaxInclusive,
-    lines: d.lines.map((l): DetailLine => ({ ...l, uomError: null })),
+    lines: lines.length > 0 ? lines : [emptyLine()],
   };
 }
 
-function BillForm() {
+export interface BillFormProps {
+  /** Defaults to "create". "edit" wires the form to /api/bills/update. */
+  mode?: "create" | "edit";
+  /**
+   * Pre-populated draft when editing an existing PI. Must carry invoiceId
+   * and docCode. Used only on first render; further edits go to a per-invoice
+   * sessionStorage draft key.
+   */
+  editInvoice?: BillDraft | null;
+}
+
+export function BillForm({ mode = "create", editInvoice = null }: BillFormProps = {}) {
   const layout = useItemLayout();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  // Draft is loaded once at mount (client only). Storage-key changes (tenant/
-  // user swap) are handled by clearing at auth boundaries.
-  const initial = useMemo(() => initialFormFromDraft(loadDraft()), []);
-  const draftScopeAtMount = useRef<string>(draftStorageKey());
+  const isEdit = mode === "edit";
+  const invoiceId = isEdit ? (editInvoice?.invoiceId ?? null) : null;
+  const editedDocCode = isEdit ? (editInvoice?.docCode ?? "") : "";
+  const draftScope = useMemo<import("@/lib/draft-store").DraftScope>(
+    () => (isEdit && invoiceId ? { kind: "edit", invoiceId } : "new"),
+    [isEdit, invoiceId],
+  );
+  // Draft is loaded once at mount (client only). In edit mode the loaded
+  // invoice is the base; a per-invoice session draft (if any) wins over it so
+  // in-flight edits survive reload.
+  const initial = useMemo(
+    () => initialFormFromDraft(loadDraft(draftScope) ?? (isEdit ? editInvoice : null)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const draftScopeAtMount = useRef<string>(draftStorageKey(draftScope));
 
   const [docDate, setDocDate] = useState(initial.docDate);
   const [supplierId, setSupplierId] = useState<number | null>(initial.supplierId);
@@ -696,8 +752,10 @@ function BillForm() {
   useEffect(() => {
     if (save.status === "success") return; // do not resurrect a saved bill
     const draft: BillDraft = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       savedAt: Date.now(),
+      invoiceId,
+      docCode: editedDocCode || null,
       docDate,
       supplierId,
       supplierLabel: supplierLabel || supplierLabelDraft,
@@ -713,6 +771,7 @@ function BillForm() {
       lines: lines.map(
         (l): DraftLine => ({
           key: l.key,
+          n3Id: l.n3Id ?? null,
           stockId: l.stockId,
           stockCode: l.stockCode,
           stockName: l.stockName,
@@ -738,7 +797,7 @@ function BillForm() {
         }),
       ),
     };
-    saveDraft(draft);
+    saveDraft(draft, draftScope);
   }, [
     docDate,
     supplierId,
@@ -757,13 +816,16 @@ function BillForm() {
     isTaxInclusive,
     lines,
     save.status,
+    draftScope,
+    invoiceId,
+    editedDocCode,
   ]);
 
   // If the auth scope shifts (tenant/user swap) while this page is mounted,
   // drop the old draft key we captured at mount so it doesn't linger.
   useEffect(() => {
     const check = () => {
-      const now = draftStorageKey();
+      const now = draftStorageKey(draftScope);
       if (now !== draftScopeAtMount.current) {
         try {
           window.sessionStorage.removeItem(draftScopeAtMount.current);
@@ -779,10 +841,10 @@ function BillForm() {
       window.removeEventListener("qne-auth-change", check);
       window.removeEventListener("storage", check);
     };
-  }, []);
+  }, [draftScope]);
 
   const resetForm = useCallback(() => {
-    clearDraft();
+    clearDraft(draftScope);
     setDocDate(todayISOInKL());
     setSupplierId(null);
     setSupplierLabelDraft("");
@@ -797,10 +859,10 @@ function BillForm() {
     setIsTaxInclusive(false);
     setLines([emptyLine()]);
     setSave({ status: "idle" });
-  }, []);
+  }, [draftScope]);
 
   const onReset = () => {
-    if (window.confirm("Clear all entered values and start a new bill?")) resetForm();
+    if (window.confirm(isEdit ? "Discard changes to this Purchase Invoice?" : "Clear all entered values and start a new bill?")) resetForm();
   };
 
   // ==================== Save to N3 =========================================
@@ -937,6 +999,7 @@ function BillForm() {
         return;
       }
       const body = {
+        ...(isEdit && invoiceId ? { invoiceId } : {}),
         header: {
           supplierId,
           docDate,
@@ -948,6 +1011,7 @@ function BillForm() {
           isTaxInclusive,
         },
         lines: lines.map((l) => ({
+          ...(isEdit && l.n3Id ? { n3Id: l.n3Id } : {}),
           stockId: l.stockId,
           uomId: l.uomId,
           glAccountId: l.glAccountId,
@@ -963,7 +1027,8 @@ function BillForm() {
           referenceNo: l.refNo,
         })),
       };
-      const res = await fetch("/api/bills/create", {
+      const endpoint = isEdit ? "/api/bills/update" : "/api/bills/create";
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${t}` },
         body: JSON.stringify(body),
@@ -976,14 +1041,20 @@ function BillForm() {
         kind?: string;
       };
       if (res.ok && d.ok && d.docCode) {
-        clearDraft();
-        // Invalidate History cache so the new invoice appears immediately.
+        clearDraft(draftScope);
         try {
           queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY });
+          if (isEdit && invoiceId) {
+            queryClient.invalidateQueries({ queryKey: ["n3", "purchaseInvoice", invoiceId] });
+          }
         } catch {
           /* best effort */
         }
-        setSave({ status: "success", docCode: d.docCode, message: "Saved to N3" });
+        setSave({
+          status: "success",
+          docCode: d.docCode,
+          message: isEdit ? "Updated in N3" : "Saved to N3",
+        });
       } else {
         setSave({
           status: "error",
@@ -1004,7 +1075,14 @@ function BillForm() {
   };
 
   if (save.status === "success" && save.docCode) {
-    return <SuccessPanel docCode={save.docCode} onNew={resetForm} navigate={navigate} />;
+    return (
+      <SuccessPanel
+        docCode={save.docCode}
+        mode={mode}
+        onNew={resetForm}
+        navigate={navigate}
+      />
+    );
   }
 
   return (
@@ -1020,9 +1098,13 @@ function BillForm() {
     >
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">New Bill Entry</h1>
+          <h1 className="text-xl font-semibold tracking-tight">
+            {isEdit ? `Edit Purchase Invoice ${editedDocCode || ""}` : "New Bill Entry"}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Simplified Purchase Invoice · posts directly to N3 · MYR
+            {isEdit
+              ? "Changes update this Purchase Invoice in N3 · MYR"
+              : "Simplified Purchase Invoice · posts directly to N3 · MYR"}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -1032,16 +1114,22 @@ function BillForm() {
             onClick={onReset}
             disabled={save.status === "saving"}
           >
-            Reset
+            {isEdit ? "Discard changes" : "Reset"}
           </button>
           <button
             type="button"
             disabled={save.status === "saving"}
             onClick={onSave}
             className="app-btn app-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-            title="Post the Purchase Invoice to N3"
+            title={isEdit ? "Update this Purchase Invoice in N3" : "Post the Purchase Invoice to N3"}
           >
-            {save.status === "saving" ? "Saving…" : "Save to N3"}
+            {save.status === "saving"
+              ? isEdit
+                ? "Updating…"
+                : "Saving…"
+              : isEdit
+                ? "Update in N3"
+                : "Save to N3"}
           </button>
         </div>
       </div>
@@ -1102,7 +1190,7 @@ function BillForm() {
             <input
               className="app-input bg-muted text-muted-foreground"
               readOnly
-              value="Assigned on save"
+              value={isEdit ? editedDocCode || "(loading…)" : "Assigned on save"}
             />
           </div>
           <div data-field="docDate">
@@ -1298,13 +1386,16 @@ function BillForm() {
 
 function SuccessPanel({
   docCode,
+  mode = "create",
   onNew,
   navigate,
 }: {
   docCode: string;
+  mode?: "create" | "edit";
   onNew: () => void;
   navigate: ReturnType<typeof useNavigate>;
 }) {
+  const isEdit = mode === "edit";
   return (
     <div className="app-card mx-auto max-w-xl p-6 text-center">
       <div
@@ -1313,19 +1404,25 @@ function SuccessPanel({
       >
         ✓
       </div>
-      <h1 className="text-lg font-semibold">Purchase Invoice created in N3</h1>
-      <p className="mt-2 text-sm text-muted-foreground">N3 assigned document number</p>
+      <h1 className="text-lg font-semibold">
+        {isEdit ? "Purchase Invoice updated in N3" : "Purchase Invoice created in N3"}
+      </h1>
+      <p className="mt-2 text-sm text-muted-foreground">
+        {isEdit ? "Document number" : "N3 assigned document number"}
+      </p>
       <p className="mt-1 text-2xl font-semibold tabular tracking-tight">{docCode}</p>
       <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-        <button type="button" className="app-btn app-btn-primary" onClick={onNew}>
-          Create Another Bill
-        </button>
+        {!isEdit && (
+          <button type="button" className="app-btn app-btn-primary" onClick={onNew}>
+            Create Another Bill
+          </button>
+        )}
         <button
           type="button"
           className="app-btn"
-          onClick={() => navigate({ to: "/history", search: { q: docCode } })}
+          onClick={() => navigate({ to: "/history" })}
         >
-          View in History
+          {isEdit ? "Back to History" : "View in History"}
         </button>
       </div>
     </div>

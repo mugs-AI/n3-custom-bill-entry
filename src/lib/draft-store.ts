@@ -1,20 +1,30 @@
-// Session-scoped preservation of an unfinished New Bill Entry.
+// Session-scoped preservation of an unfinished New Bill Entry or an in-flight
+// edit of an existing Purchase Invoice.
 //
-// - Storage: sessionStorage (survives Settings navigation and same-tab refresh;
-//   does NOT leak to other tabs or persist after tab close).
+// - Storage: sessionStorage. Survives Settings navigation and same-tab refresh;
+//   does NOT leak to other tabs or persist after tab close.
 // - Namespaced by immutable N3 tenant + user IDs from the JWT so switching
 //   companies/accounts on the same browser never restores foreign data.
+// - Namespaced by *scope*: "new" for the create screen, or the N3 invoice id
+//   for each edit screen. Edits to one PI never overwrite the New Bill draft
+//   and never mix with a different PI's edits.
 // - Never stores tokens, API keys, or credentials — only the form values the
-//   user typed and the immutable N3 IDs they selected.
+//   user typed and the immutable N3 IDs they selected. May carry the N3
+//   invoice/detail line UUIDs so an in-flight edit round-trips correctly on
+//   /api/bills/update.
 // - Schema-versioned; corrupt or old drafts are safely discarded.
 
 import { decodeJwt, getToken } from "./auth-store";
 
-export const DRAFT_SCHEMA_VERSION = 1;
+export const DRAFT_SCHEMA_VERSION = 2;
 export const DRAFT_EVENT = "custom-bill-entry:draft-change";
+
+export type DraftScope = "new" | { kind: "edit"; invoiceId: string };
 
 export interface DraftLine {
   key: string;
+  /** N3 PurchaseInvoiceDetailDto.id — present only when editing an existing PI. */
+  n3Id?: string | null;
   stockId: number | null;
   stockCode: string;
   stockName: string;
@@ -42,6 +52,10 @@ export interface DraftLine {
 export interface BillDraft {
   schemaVersion: number;
   savedAt: number;
+  /** N3 PurchaseInvoiceDto.id — present only when editing an existing PI. */
+  invoiceId?: string | null;
+  /** N3 docCode — present only when editing an existing PI. */
+  docCode?: string | null;
   docDate: string;
   supplierId: number | null;
   supplierLabel: string;
@@ -77,8 +91,16 @@ export function getAuthScope(): { tenantId: string; userId: string } {
   return { tenantId, userId };
 }
 
-export function draftStorageKey(scope = getAuthScope()): string {
-  return `custom-bill-entry:draft:${scope.tenantId}:${scope.userId}`;
+function scopeSuffix(scope: DraftScope): string {
+  if (scope === "new") return "new";
+  return `edit:${scope.invoiceId}`;
+}
+
+export function draftStorageKey(
+  scope: DraftScope = "new",
+  authScope = getAuthScope(),
+): string {
+  return `custom-bill-entry:draft:${authScope.tenantId}:${authScope.userId}:${scopeSuffix(scope)}`;
 }
 
 function safeSession(): Storage | null {
@@ -109,6 +131,7 @@ function coerceLine(raw: unknown): DraftLine | null {
   if (!isStr(r.key)) return null;
   return {
     key: r.key,
+    n3Id: isStrOrNull(r.n3Id) ? r.n3Id : null,
     stockId: isNumOrNull(r.stockId) ? r.stockId : null,
     stockCode: isStr(r.stockCode) ? r.stockCode : "",
     stockName: isStr(r.stockName) ? r.stockName : "",
@@ -137,6 +160,7 @@ function coerceLine(raw: unknown): DraftLine | null {
 export function coerceDraft(raw: unknown): BillDraft | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
+  // Accept the current schema only; drop older shapes silently.
   if (r.schemaVersion !== DRAFT_SCHEMA_VERSION) return null;
   const lines = Array.isArray(r.lines)
     ? r.lines.map(coerceLine).filter((x): x is DraftLine => !!x)
@@ -145,6 +169,8 @@ export function coerceDraft(raw: unknown): BillDraft | null {
   return {
     schemaVersion: DRAFT_SCHEMA_VERSION,
     savedAt: typeof r.savedAt === "number" ? r.savedAt : Date.now(),
+    invoiceId: isStrOrNull(r.invoiceId) ? r.invoiceId : null,
+    docCode: isStrOrNull(r.docCode) ? r.docCode : null,
     docDate: isStr(r.docDate) ? r.docDate : "",
     supplierId: isNumOrNull(r.supplierId) ? r.supplierId : null,
     supplierLabel: isStr(r.supplierLabel) ? r.supplierLabel : "",
@@ -161,11 +187,11 @@ export function coerceDraft(raw: unknown): BillDraft | null {
   };
 }
 
-export function loadDraft(): BillDraft | null {
+export function loadDraft(scope: DraftScope = "new"): BillDraft | null {
   const s = safeSession();
   if (!s) return null;
   try {
-    const raw = s.getItem(draftStorageKey());
+    const raw = s.getItem(draftStorageKey(scope));
     if (!raw) return null;
     return coerceDraft(JSON.parse(raw));
   } catch {
@@ -173,23 +199,26 @@ export function loadDraft(): BillDraft | null {
   }
 }
 
-export function saveDraft(d: BillDraft): void {
+export function saveDraft(d: BillDraft, scope: DraftScope = "new"): void {
   const s = safeSession();
   if (!s) return;
   try {
     const payload: BillDraft = { ...d, schemaVersion: DRAFT_SCHEMA_VERSION, savedAt: Date.now() };
-    s.setItem(draftStorageKey(), JSON.stringify(payload));
+    s.setItem(draftStorageKey(scope), JSON.stringify(payload));
     window.dispatchEvent(new Event(DRAFT_EVENT));
   } catch {
     // ignore quota / access errors
   }
 }
 
-export function clearDraft(scope?: { tenantId: string; userId: string }): void {
+export function clearDraft(
+  scope: DraftScope = "new",
+  authScope?: { tenantId: string; userId: string },
+): void {
   const s = safeSession();
   if (!s) return;
   try {
-    s.removeItem(draftStorageKey(scope));
+    s.removeItem(draftStorageKey(scope, authScope));
     window.dispatchEvent(new Event(DRAFT_EVENT));
   } catch {
     // ignore
