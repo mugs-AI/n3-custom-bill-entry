@@ -1360,6 +1360,9 @@ interface LineCtx {
   onGlSelect: (line: DetailLine, opt: ComboOption | null) => void;
   onChange: (key: string, patch: Partial<DetailLine>) => void;
   lineNet: (l: DetailLine) => number;
+  lineTax: (l: DetailLine) => number;
+  invalidFields: Set<string>;
+
 }
 
 function LineList({
