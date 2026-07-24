@@ -1023,17 +1023,40 @@ function BillForm() {
           </button>
           <button
             type="button"
-            disabled={!canSave}
+            disabled={save.status === "saving"}
             onClick={onSave}
             className="app-btn app-btn-primary disabled:cursor-not-allowed disabled:opacity-60"
-            title={
-              canSave ? "Post the Purchase Invoice to N3" : "Fill required fields before saving"
-            }
+            title="Post the Purchase Invoice to N3"
           >
-            {save.status === "saving" ? "Saving to N3…" : "Save to N3"}
+            {save.status === "saving" ? "Saving…" : "Save to N3"}
           </button>
         </div>
       </div>
+
+      {validationErrors.length > 0 && (
+        <div
+          className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          role="alert"
+          aria-live="assertive"
+        >
+          <strong>Please fix these before saving:</strong>
+          <ul className="ml-5 mt-1 list-disc">
+            {validationErrors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {validationErrors.length > 0 && blockingReasons.length > 0 && (
+        <div
+          className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm"
+          role="status"
+        >
+          <strong>Still loading:</strong>{" "}
+          {blockingReasons.join(" · ")}
+        </div>
+      )}
 
       {save.status === "error" && save.message && (
         <div
