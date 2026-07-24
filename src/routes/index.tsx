@@ -1175,7 +1175,8 @@ function BillForm() {
             <label className="app-label">Supplier Email</label>
             <input className="app-input" readOnly value={email} />
           </div>
-          <div>
+          <div data-field="term">
+
             <label className="app-label">
               Term <span className="text-destructive">*</span>
             </label>
