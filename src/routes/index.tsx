@@ -129,6 +129,8 @@ interface TariffCode {
 
 interface DetailLine {
   key: string;
+  /** N3 PurchaseInvoiceDetailDto.id — set only for lines loaded in edit mode. */
+  n3Id?: string | null;
   stockId: number | null;
   stockCode: string;
   stockName: string;
