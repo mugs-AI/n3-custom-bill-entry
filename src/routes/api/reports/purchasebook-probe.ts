@@ -234,7 +234,7 @@ async function handle(request: Request): Promise<Response> {
     .map((r) => pick(r as Record<string, unknown>, SAFE_SUMMARY_KEYS));
 
   // Debit/Credit interpretations for diagnosis only.
-  const sums = posting.reduce(
+  const sums = posting.reduce<{ pos: number; neg: number }>(
     (acc, r) => {
       const amount = typeof r.amount === "number" ? r.amount : Number(r.amount) || 0;
       if (amount > 0) acc.pos = round2(acc.pos + amount);
