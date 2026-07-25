@@ -8,45 +8,16 @@
 
 import type { BillDraft, DraftLine } from "./draft-store";
 import { DRAFT_SCHEMA_VERSION } from "./draft-store";
+import {
+  extractPurchaseInvoiceDetails,
+  type PurchaseInvoice,
+  type PurchaseInvoiceDetail,
+} from "./purchase-invoice";
 
-export interface RawInvoiceLine {
-  id?: string | null;
-  pos?: number;
-  stockId?: number | null;
-  stock?: { id?: number; code?: string; name?: string; description?: string } | null;
-  uomId?: number | null;
-  uom?: { id?: number; code?: string } | null;
-  accountId?: string | null;
-  account?: { id?: string; code?: string; name?: string } | null;
-  projectId?: number | null;
-  project?: { id?: number; code?: string; name?: string } | null;
-  taxCodeId?: number | null;
-  taxCode?: { id?: number; code?: string; fullName?: string; name?: string } | null;
-  tariffCodeId?: number | null;
-  tariffCode?: { id?: number; code?: string; description?: string } | null;
-  description?: string;
-  qty?: number;
-  unitPrice?: number;
-  referenceNo?: string;
-}
-
-export interface RawInvoice {
-  id?: string;
-  docCode?: string;
-  docDate?: string;
-  supplierId?: number | null;
-  supplier?: { id?: number; code?: string; name?: string } | null;
-  purchaserId?: number | null;
-  purchaser?: { id?: number; code?: string; name?: string } | null;
-  termId?: number | null;
-  term?: { id?: number; code?: string; description?: string } | null;
-  description?: string;
-  referenceNo?: string;
-  supplierInvNo?: string;
-  isTaxInclusive?: boolean;
-  itemDetails?: RawInvoiceLine[];
-  details?: RawInvoiceLine[];
-}
+/** @deprecated Use PurchaseInvoiceDetail from purchase-invoice.ts. */
+export type RawInvoiceLine = PurchaseInvoiceDetail;
+/** @deprecated Use PurchaseInvoice from purchase-invoice.ts. */
+export type RawInvoice = PurchaseInvoice;
 
 function joinLabel(code: string | undefined | null, name: string | undefined | null): string {
   const c = (code ?? "").trim();
@@ -59,8 +30,11 @@ function toStr(n: number | undefined | null): string {
   return typeof n === "number" && Number.isFinite(n) ? String(n) : "";
 }
 
-export function invoiceToDraft(raw: RawInvoice): BillDraft {
-  const details = raw.itemDetails ?? raw.details ?? [];
+export function invoiceToDraft(raw: PurchaseInvoice): BillDraft {
+  // Use the same shared extractor as GL Analysis so both consumers agree on
+  // which array is the canonical PurchaseInvoiceDetailDto set. If the shape
+  // is unrecognised the extractor throws — no silent empty invoice.
+  const details = extractPurchaseInvoiceDetails(raw);
   const lines: DraftLine[] = details.map((d, i) => {
     const stockId = d.stockId ?? d.stock?.id ?? null;
     const uomId = d.uomId ?? d.uom?.id ?? null;

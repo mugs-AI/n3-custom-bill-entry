@@ -15,19 +15,22 @@ import {
 
 // Server-side GL Analysis / Purchase Audit Trail data fetcher.
 //
-// Endpoint strategy (Phase 3A §3): the N3 purchase API has no batch line-level
-// query — /api/PurchaseInvoices/Query returns headers only, and detail lines
-// only come back per-invoice via /api/PurchaseInvoices/{id}. So we:
+// Endpoint strategy (Phase 3A Correction A): the main N3 `purchase-v1` API
+// has no batch line-level query — /api/PurchaseInvoices/Query returns
+// headers only, and detail lines only come back per-invoice via
+// /api/PurchaseInvoices/{id}. The separate Reporting API DOES expose
+// /api/reporting/PurchaseHistory/Inquiry, but it lacks the GL Account link
+// and HQ Sequence that GL Analysis needs, so we keep the per-invoice
+// hydrate as the source of GL truth. We:
 //   1. Query headers with an OData filter built from immutable IDs plus the
 //      date range and isCancelled=false (§5 exclusion). $count=true.
 //   2. Enforce a 2,000-invoice safety limit — if N3 reports more matches, we
 //      refuse and return { overLimit: true } with no partial totals.
 //   3. Fetch each header's detail via bounded concurrency (max 3) so we never
 //      fire an unbounded Promise.all.
-//   4. Map to typed GLDrillDownLine[], apply line-level filters, aggregate.
-//
-// No token or upstream payload is echoed. N3 error text is truncated and
-// stripped of newlines so raw LINQ / stack traces cannot reach the browser.
+//   4. Map to typed GLDrillDownLine[] through the shared extractor. Any
+//      fetch or schema-mapping failure refuses the whole report so partial
+//      totals can never reach the browser (Task 4).
 
 const MAIN_DEFAULT = "https://openapi.account.qne.cloud";
 const PAGE_SIZE = 200;
@@ -57,9 +60,10 @@ type Reply =
   | { ok: true; report: ReportData }
   | {
       ok: false;
-      kind: "auth" | "validation" | "over-limit" | "n3" | "network";
+      kind: "auth" | "validation" | "over-limit" | "n3" | "network" | "incomplete";
       error: string;
       matchedInvoiceCount?: number;
+      failedInvoiceCount?: number;
       limit?: number;
     };
 
@@ -232,11 +236,33 @@ async function handle(request: Request): Promise<Response> {
     });
   }
 
-  // Step 3: map + aggregate.
+  // Step 3: map + aggregate. Any schema-mapping failure prevents partial
+  // totals (Task 4). We collect first-failure diagnostic then refuse.
   const allLines: GLDrillDownLine[] = [];
+  let mappedInvoiceCount = 0;
+  const mapFailures: string[] = [];
   for (const inv of details) {
     if (!inv) continue;
-    for (const line of mapInvoiceToLines(inv)) allLines.push(line);
+    try {
+      const rows = mapInvoiceToLines(inv);
+      for (const line of rows) allLines.push(line);
+      mappedInvoiceCount += 1;
+    } catch (err) {
+      const doc =
+        (typeof inv.docCode === "string" && inv.docCode) || (typeof inv.id === "string" && inv.id) || "(unknown)";
+      const msg = err instanceof Error ? err.message : "Unknown mapping error";
+      mapFailures.push(`${doc}: ${safeMessage(msg, "mapping failed")}`);
+    }
+  }
+  if (mapFailures.length > 0) {
+    const first = mapFailures[0];
+    return jsonRes(502, {
+      ok: false,
+      kind: "incomplete",
+      error: `GL Analysis could not map complete detail data for ${mapFailures.length} of ${total} Purchase Invoice${total === 1 ? "" : "s"}. No totals were produced. Please retry. First failure: ${first}`,
+      matchedInvoiceCount: total,
+      failedInvoiceCount: mapFailures.length,
+    });
   }
   const filtered = filterLines(allLines, criteria);
   const groups = aggregateByGL(filtered);
@@ -248,7 +274,7 @@ async function handle(request: Request): Promise<Response> {
     groups,
     lines: filtered,
     matchedInvoiceCount: total,
-    fetchedInvoiceCount: details.filter((x) => x != null).length,
+    fetchedInvoiceCount: mappedInvoiceCount,
     overLimit: false,
   };
   return jsonRes(200, { ok: true, report });

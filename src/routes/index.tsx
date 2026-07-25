@@ -1099,11 +1099,13 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">
-            {isEdit ? `Edit Purchase Invoice ${editedDocCode || ""}` : "New Bill Entry"}
+            {isEdit
+              ? `Edit Purchase Invoice — ${editedDocCode || "(loading…)"}`
+              : "New Bill Entry"}
           </h1>
           <p className="text-sm text-muted-foreground">
             {isEdit
-              ? "Changes update this Purchase Invoice in N3 · MYR"
+              ? "Loaded live from N3. Changes save to this existing document."
               : "Simplified Purchase Invoice · posts directly to N3 · MYR"}
           </p>
         </div>

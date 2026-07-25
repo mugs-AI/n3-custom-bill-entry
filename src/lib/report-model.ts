@@ -22,6 +22,12 @@
 
 import { round2, sumTo2dp } from "./money";
 import { escapeODataString } from "./history-query";
+import {
+  extractPurchaseInvoiceDetails,
+  PurchaseInvoiceMappingError,
+  type PurchaseInvoice,
+  type PurchaseInvoiceDetail,
+} from "./purchase-invoice";
 
 export const UNASSIGNED_CODE = "UNASSIGNED";
 export const UNASSIGNED_NAME = "(No GL Account)";
@@ -241,53 +247,28 @@ export function buildSummary(
 
 // ---------- N3 -> GLDrillDownLine mapping ----------
 
-export interface RawN3Line {
-  id?: string;
-  pos?: number;
-  accountId?: string | null;
-  account?: { code?: string; name?: string } | null;
-  accountName?: string;
-  stockId?: number | null;
-  stock?: { code?: string; name?: string } | null;
-  projectId?: number | null;
-  project?: { code?: string; name?: string } | null;
-  taxCodeId?: number | null;
-  taxCode?: { code?: string; description?: string } | null;
-  description?: string;
-  qty?: number;
-  unitPrice?: number;
-  netAmount?: number;
-  taxAmount?: number;
-  subAmount?: number;
-  referenceNo?: string;
-}
-
-export interface RawN3Header {
-  id: string;
-  docCode?: string;
-  docDate?: string;
-  isCancelled?: boolean;
-  description?: string;
-  supplierInvNo?: string;
-  supplierId?: number | null;
-  supplier?: { code?: string; name?: string } | null;
-  purchaser?: { code?: string; name?: string } | null;
-  term?: { code?: string; description?: string } | null;
-  details?: RawN3Line[];
-  itemDetails?: RawN3Line[];
-}
+// Back-compat aliases for existing consumers/tests.
+export type RawN3Line = PurchaseInvoiceDetail;
+export type RawN3Header = PurchaseInvoice;
 
 /**
  * Map an N3 PurchaseInvoiceDto (with detail lines) to zero or more
- * GLDrillDownLine rows. Cancelled invoices produce no rows.
+ * GLDrillDownLine rows. Cancelled invoices produce no rows. If the
+ * response is missing BOTH itemDetails and details arrays this throws a
+ * sanitized `PurchaseInvoiceMappingError` — never silently returns []
+ * (Task 2 + Task 4). An explicit empty array is handled separately and
+ * returns [].
  */
-export function mapInvoiceToLines(inv: RawN3Header): GLDrillDownLine[] {
+export function mapInvoiceToLines(inv: PurchaseInvoice): GLDrillDownLine[] {
   if (inv.isCancelled) return [];
-  const details = Array.isArray(inv.details)
-    ? inv.details
-    : Array.isArray(inv.itemDetails)
-      ? inv.itemDetails
-      : [];
+  const details = extractPurchaseInvoiceDetails(inv); // throws on missing schema
+  const invoiceId = typeof inv.id === "string" ? inv.id : "";
+  if (!invoiceId) {
+    throw new PurchaseInvoiceMappingError(
+      `Purchase Invoice ${inv.docCode ?? "(unknown)"} response has no id.`,
+      inv.docCode ?? "(unknown)",
+    );
+  }
   const docDate = typeof inv.docDate === "string" ? inv.docDate.slice(0, 10) : "";
   const supplierCode = inv.supplier?.code ?? "";
   const supplierName = inv.supplier?.name ?? "";
@@ -307,7 +288,7 @@ export function mapInvoiceToLines(inv: RawN3Header): GLDrillDownLine[] {
     const glCode = d.account?.code ?? "";
     const glName = d.account?.name ?? d.accountName ?? "";
     out.push({
-      invoiceId: inv.id,
+      invoiceId,
       docCode: inv.docCode ?? "",
       docDate,
       isCancelled: !!inv.isCancelled,
@@ -340,6 +321,8 @@ export function mapInvoiceToLines(inv: RawN3Header): GLDrillDownLine[] {
   });
   return out;
 }
+
+export { PurchaseInvoiceMappingError };
 
 // ---------- Bounded concurrency helper (pure) ----------
 
