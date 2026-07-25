@@ -485,7 +485,20 @@ function ReportsPage() {
           </div>
         ) : err ? (
           <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            <strong>Inquiry failed:</strong> {err.message}
+            <div>
+              <strong>
+                {err.kind === "incomplete" ? "Incomplete report:" : "Inquiry failed:"}
+              </strong>{" "}
+              {err.message}
+            </div>
+            <button
+              type="button"
+              className="app-btn mt-2"
+              onClick={runInquiry}
+              disabled={mutation.isPending}
+            >
+              Retry inquiry
+            </button>
           </div>
         ) : report ? (
           <>
