@@ -327,8 +327,13 @@ function ReportsPage() {
               Purchase Audit Trail grouped by GL Account. Live from N3 · MYR.
             </p>
           </div>
-          <div className="text-xs text-muted-foreground">
-            Cancelled/voided Purchase Invoices are excluded.
+          <div className="flex items-center gap-3">
+            <Link to="/reports/purchasebook-probe" className="app-btn">
+              PurchaseBook Probe
+            </Link>
+            <div className="text-xs text-muted-foreground">
+              Cancelled/voided Purchase Invoices are excluded.
+            </div>
           </div>
         </div>
 

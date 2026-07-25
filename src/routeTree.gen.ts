@@ -14,7 +14,9 @@ import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as DevLoginRouteImport } from './routes/dev-login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ReportsPurchasebookProbeRouteImport } from './routes/reports.purchasebook-probe'
 import { Route as PurchaseInvoicesIdEditRouteImport } from './routes/purchase-invoices.$id.edit'
+import { Route as ApiReportsPurchasebookProbeRouteImport } from './routes/api/reports/purchasebook-probe'
 import { Route as ApiReportsGlAnalysisRouteImport } from './routes/api/reports/gl-analysis'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiBillsUpdateRouteImport } from './routes/api/bills/update'
@@ -46,11 +48,23 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReportsPurchasebookProbeRoute =
+  ReportsPurchasebookProbeRouteImport.update({
+    id: '/purchasebook-probe',
+    path: '/purchasebook-probe',
+    getParentRoute: () => ReportsRoute,
+  } as any)
 const PurchaseInvoicesIdEditRoute = PurchaseInvoicesIdEditRouteImport.update({
   id: '/purchase-invoices/$id/edit',
   path: '/purchase-invoices/$id/edit',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiReportsPurchasebookProbeRoute =
+  ApiReportsPurchasebookProbeRouteImport.update({
+    id: '/api/reports/purchasebook-probe',
+    path: '/api/reports/purchasebook-probe',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiReportsGlAnalysisRoute = ApiReportsGlAnalysisRouteImport.update({
   id: '/api/reports/gl-analysis',
   path: '/api/reports/gl-analysis',
@@ -81,26 +95,30 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dev-login': typeof DevLoginRoute
   '/history': typeof HistoryRoute
-  '/reports': typeof ReportsRoute
+  '/reports': typeof ReportsRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/reports/purchasebook-probe': typeof ReportsPurchasebookProbeRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/bills/update': typeof ApiBillsUpdateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/reports/gl-analysis': typeof ApiReportsGlAnalysisRoute
+  '/api/reports/purchasebook-probe': typeof ApiReportsPurchasebookProbeRoute
   '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dev-login': typeof DevLoginRoute
   '/history': typeof HistoryRoute
-  '/reports': typeof ReportsRoute
+  '/reports': typeof ReportsRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/reports/purchasebook-probe': typeof ReportsPurchasebookProbeRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/bills/update': typeof ApiBillsUpdateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/reports/gl-analysis': typeof ApiReportsGlAnalysisRoute
+  '/api/reports/purchasebook-probe': typeof ApiReportsPurchasebookProbeRoute
   '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
 }
 export interface FileRoutesById {
@@ -108,13 +126,15 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dev-login': typeof DevLoginRoute
   '/history': typeof HistoryRoute
-  '/reports': typeof ReportsRoute
+  '/reports': typeof ReportsRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/reports/purchasebook-probe': typeof ReportsPurchasebookProbeRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/bills/update': typeof ApiBillsUpdateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
   '/api/reports/gl-analysis': typeof ApiReportsGlAnalysisRoute
+  '/api/reports/purchasebook-probe': typeof ApiReportsPurchasebookProbeRoute
   '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
 }
 export interface FileRouteTypes {
@@ -125,11 +145,13 @@ export interface FileRouteTypes {
     | '/history'
     | '/reports'
     | '/settings'
+    | '/reports/purchasebook-probe'
     | '/api/auth/dev-connect'
     | '/api/bills/create'
     | '/api/bills/update'
     | '/api/proxy/$'
     | '/api/reports/gl-analysis'
+    | '/api/reports/purchasebook-probe'
     | '/purchase-invoices/$id/edit'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -138,11 +160,13 @@ export interface FileRouteTypes {
     | '/history'
     | '/reports'
     | '/settings'
+    | '/reports/purchasebook-probe'
     | '/api/auth/dev-connect'
     | '/api/bills/create'
     | '/api/bills/update'
     | '/api/proxy/$'
     | '/api/reports/gl-analysis'
+    | '/api/reports/purchasebook-probe'
     | '/purchase-invoices/$id/edit'
   id:
     | '__root__'
@@ -151,11 +175,13 @@ export interface FileRouteTypes {
     | '/history'
     | '/reports'
     | '/settings'
+    | '/reports/purchasebook-probe'
     | '/api/auth/dev-connect'
     | '/api/bills/create'
     | '/api/bills/update'
     | '/api/proxy/$'
     | '/api/reports/gl-analysis'
+    | '/api/reports/purchasebook-probe'
     | '/purchase-invoices/$id/edit'
   fileRoutesById: FileRoutesById
 }
@@ -163,13 +189,14 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DevLoginRoute: typeof DevLoginRoute
   HistoryRoute: typeof HistoryRoute
-  ReportsRoute: typeof ReportsRoute
+  ReportsRoute: typeof ReportsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   ApiAuthDevConnectRoute: typeof ApiAuthDevConnectRoute
   ApiBillsCreateRoute: typeof ApiBillsCreateRoute
   ApiBillsUpdateRoute: typeof ApiBillsUpdateRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
   ApiReportsGlAnalysisRoute: typeof ApiReportsGlAnalysisRoute
+  ApiReportsPurchasebookProbeRoute: typeof ApiReportsPurchasebookProbeRoute
   PurchaseInvoicesIdEditRoute: typeof PurchaseInvoicesIdEditRoute
 }
 
@@ -210,11 +237,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reports/purchasebook-probe': {
+      id: '/reports/purchasebook-probe'
+      path: '/purchasebook-probe'
+      fullPath: '/reports/purchasebook-probe'
+      preLoaderRoute: typeof ReportsPurchasebookProbeRouteImport
+      parentRoute: typeof ReportsRoute
+    }
     '/purchase-invoices/$id/edit': {
       id: '/purchase-invoices/$id/edit'
       path: '/purchase-invoices/$id/edit'
       fullPath: '/purchase-invoices/$id/edit'
       preLoaderRoute: typeof PurchaseInvoicesIdEditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/reports/purchasebook-probe': {
+      id: '/api/reports/purchasebook-probe'
+      path: '/api/reports/purchasebook-probe'
+      fullPath: '/api/reports/purchasebook-probe'
+      preLoaderRoute: typeof ApiReportsPurchasebookProbeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/reports/gl-analysis': {
@@ -255,29 +296,31 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface ReportsRouteChildren {
+  ReportsPurchasebookProbeRoute: typeof ReportsPurchasebookProbeRoute
+}
+
+const ReportsRouteChildren: ReportsRouteChildren = {
+  ReportsPurchasebookProbeRoute: ReportsPurchasebookProbeRoute,
+}
+
+const ReportsRouteWithChildren =
+  ReportsRoute._addFileChildren(ReportsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DevLoginRoute: DevLoginRoute,
   HistoryRoute: HistoryRoute,
-  ReportsRoute: ReportsRoute,
+  ReportsRoute: ReportsRouteWithChildren,
   SettingsRoute: SettingsRoute,
   ApiAuthDevConnectRoute: ApiAuthDevConnectRoute,
   ApiBillsCreateRoute: ApiBillsCreateRoute,
   ApiBillsUpdateRoute: ApiBillsUpdateRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
   ApiReportsGlAnalysisRoute: ApiReportsGlAnalysisRoute,
+  ApiReportsPurchasebookProbeRoute: ApiReportsPurchasebookProbeRoute,
   PurchaseInvoicesIdEditRoute: PurchaseInvoicesIdEditRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

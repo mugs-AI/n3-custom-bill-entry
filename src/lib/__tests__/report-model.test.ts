@@ -173,6 +173,38 @@ describe("mapInvoiceToLines", () => {
     delete inv.details;
     expect(mapInvoiceToLines(inv)).toHaveLength(1);
   });
+
+
+
+  // Anti-swap guardrail (Phase 3B Prerequisite Task 1). Locks the mapping so
+  // beforeTax always comes from netAmount and includingTax from subAmount,
+  // never the reverse.
+  it("field mapping: beforeTax<-netAmount, taxAmount<-taxAmount, includingTax<-subAmount", () => {
+    const inv: RawN3Header = {
+      id: "inv-accept",
+      docCode: "M1B2607002Ikeyinn3",
+      docDate: "2026-07-24T00:00:00Z",
+      isCancelled: false,
+      itemDetails: [
+        { id: "l1", pos: 1, accountId: "gl", account: { code: "300-9000", name: "P" },
+          netAmount: 100, taxAmount: 5, subAmount: 105 },
+        { id: "l2", pos: 2, accountId: "gl", account: { code: "300-9000", name: "P" },
+          netAmount: 200, taxAmount: 20, subAmount: 220 },
+        { id: "l3", pos: 3, accountId: "gl", account: { code: "300-9000", name: "P" },
+          netAmount: 600, taxAmount: 60, subAmount: 660 },
+      ],
+    };
+    const rows = mapInvoiceToLines(inv);
+    expect(rows.map((r) => r.beforeTax)).toEqual([100, 200, 600]);
+    expect(rows.map((r) => r.taxAmount)).toEqual([5, 20, 60]);
+    expect(rows.map((r) => r.includingTax)).toEqual([105, 220, 660]);
+    // Reject any swap: beforeTax total must be strictly less than includingTax.
+    const sumB = rows.reduce((a, r) => a + r.beforeTax, 0);
+    const sumI = rows.reduce((a, r) => a + r.includingTax, 0);
+    expect(sumB).toBe(900);
+    expect(sumI).toBe(985);
+    expect(sumB).toBeLessThan(sumI);
+  });
 });
 
 describe("aggregateByGL", () => {
