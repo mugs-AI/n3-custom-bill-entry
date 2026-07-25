@@ -15,19 +15,22 @@ import {
 
 // Server-side GL Analysis / Purchase Audit Trail data fetcher.
 //
-// Endpoint strategy (Phase 3A §3): the N3 purchase API has no batch line-level
-// query — /api/PurchaseInvoices/Query returns headers only, and detail lines
-// only come back per-invoice via /api/PurchaseInvoices/{id}. So we:
+// Endpoint strategy (Phase 3A Correction A): the main N3 `purchase-v1` API
+// has no batch line-level query — /api/PurchaseInvoices/Query returns
+// headers only, and detail lines only come back per-invoice via
+// /api/PurchaseInvoices/{id}. The separate Reporting API DOES expose
+// /api/reporting/PurchaseHistory/Inquiry, but it lacks the GL Account link
+// and HQ Sequence that GL Analysis needs, so we keep the per-invoice
+// hydrate as the source of GL truth. We:
 //   1. Query headers with an OData filter built from immutable IDs plus the
 //      date range and isCancelled=false (§5 exclusion). $count=true.
 //   2. Enforce a 2,000-invoice safety limit — if N3 reports more matches, we
 //      refuse and return { overLimit: true } with no partial totals.
 //   3. Fetch each header's detail via bounded concurrency (max 3) so we never
 //      fire an unbounded Promise.all.
-//   4. Map to typed GLDrillDownLine[], apply line-level filters, aggregate.
-//
-// No token or upstream payload is echoed. N3 error text is truncated and
-// stripped of newlines so raw LINQ / stack traces cannot reach the browser.
+//   4. Map to typed GLDrillDownLine[] through the shared extractor. Any
+//      fetch or schema-mapping failure refuses the whole report so partial
+//      totals can never reach the browser (Task 4).
 
 const MAIN_DEFAULT = "https://openapi.account.qne.cloud";
 const PAGE_SIZE = 200;
