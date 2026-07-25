@@ -57,9 +57,10 @@ type Reply =
   | { ok: true; report: ReportData }
   | {
       ok: false;
-      kind: "auth" | "validation" | "over-limit" | "n3" | "network";
+      kind: "auth" | "validation" | "over-limit" | "n3" | "network" | "incomplete";
       error: string;
       matchedInvoiceCount?: number;
+      failedInvoiceCount?: number;
       limit?: number;
     };
 
