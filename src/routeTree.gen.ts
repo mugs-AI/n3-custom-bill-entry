@@ -15,6 +15,7 @@ import { Route as HistoryRouteImport } from './routes/history'
 import { Route as DevLoginRouteImport } from './routes/dev-login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PurchaseInvoicesIdEditRouteImport } from './routes/purchase-invoices.$id.edit'
+import { Route as ApiReportsGlAnalysisRouteImport } from './routes/api/reports/gl-analysis'
 import { Route as ApiProxySplatRouteImport } from './routes/api/proxy/$'
 import { Route as ApiBillsUpdateRouteImport } from './routes/api/bills/update'
 import { Route as ApiBillsCreateRouteImport } from './routes/api/bills/create'
@@ -50,6 +51,11 @@ const PurchaseInvoicesIdEditRoute = PurchaseInvoicesIdEditRouteImport.update({
   path: '/purchase-invoices/$id/edit',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiReportsGlAnalysisRoute = ApiReportsGlAnalysisRouteImport.update({
+  id: '/api/reports/gl-analysis',
+  path: '/api/reports/gl-analysis',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiProxySplatRoute = ApiProxySplatRouteImport.update({
   id: '/api/proxy/$',
   path: '/api/proxy/$',
@@ -81,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/bills/update': typeof ApiBillsUpdateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
+  '/api/reports/gl-analysis': typeof ApiReportsGlAnalysisRoute
   '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
 }
 export interface FileRoutesByTo {
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/bills/update': typeof ApiBillsUpdateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
+  '/api/reports/gl-analysis': typeof ApiReportsGlAnalysisRoute
   '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
 }
 export interface FileRoutesById {
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/bills/update': typeof ApiBillsUpdateRoute
   '/api/proxy/$': typeof ApiProxySplatRoute
+  '/api/reports/gl-analysis': typeof ApiReportsGlAnalysisRoute
   '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
 }
 export interface FileRouteTypes {
@@ -120,6 +129,7 @@ export interface FileRouteTypes {
     | '/api/bills/create'
     | '/api/bills/update'
     | '/api/proxy/$'
+    | '/api/reports/gl-analysis'
     | '/purchase-invoices/$id/edit'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/api/bills/create'
     | '/api/bills/update'
     | '/api/proxy/$'
+    | '/api/reports/gl-analysis'
     | '/purchase-invoices/$id/edit'
   id:
     | '__root__'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/api/bills/create'
     | '/api/bills/update'
     | '/api/proxy/$'
+    | '/api/reports/gl-analysis'
     | '/purchase-invoices/$id/edit'
   fileRoutesById: FileRoutesById
 }
@@ -157,6 +169,7 @@ export interface RootRouteChildren {
   ApiBillsCreateRoute: typeof ApiBillsCreateRoute
   ApiBillsUpdateRoute: typeof ApiBillsUpdateRoute
   ApiProxySplatRoute: typeof ApiProxySplatRoute
+  ApiReportsGlAnalysisRoute: typeof ApiReportsGlAnalysisRoute
   PurchaseInvoicesIdEditRoute: typeof PurchaseInvoicesIdEditRoute
 }
 
@@ -204,6 +217,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PurchaseInvoicesIdEditRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/reports/gl-analysis': {
+      id: '/api/reports/gl-analysis'
+      path: '/api/reports/gl-analysis'
+      fullPath: '/api/reports/gl-analysis'
+      preLoaderRoute: typeof ApiReportsGlAnalysisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/proxy/$': {
       id: '/api/proxy/$'
       path: '/api/proxy/$'
@@ -245,18 +265,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiBillsCreateRoute: ApiBillsCreateRoute,
   ApiBillsUpdateRoute: ApiBillsUpdateRoute,
   ApiProxySplatRoute: ApiProxySplatRoute,
+  ApiReportsGlAnalysisRoute: ApiReportsGlAnalysisRoute,
   PurchaseInvoicesIdEditRoute: PurchaseInvoicesIdEditRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
