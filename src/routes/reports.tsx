@@ -814,13 +814,15 @@ function Td({
   children,
   className,
   colSpan,
+  title,
 }: {
   children?: React.ReactNode;
   className?: string;
   colSpan?: number;
+  title?: string;
 }) {
   return (
-    <td colSpan={colSpan} className={`px-3 py-2 align-top ${className ?? ""}`}>
+    <td colSpan={colSpan} title={title} className={`px-3 py-2 align-top ${className ?? ""}`}>
       {children}
     </td>
   );
