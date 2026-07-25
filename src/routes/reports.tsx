@@ -280,7 +280,9 @@ function ReportsPage() {
   }, [mutation]);
 
   const report = mutation.data ?? null;
-  const err = mutation.error as (Error & { matchedInvoiceCount?: number }) | null;
+  const err = mutation.error as
+    | (Error & { kind?: string; matchedInvoiceCount?: number; failedInvoiceCount?: number })
+    | null;
 
   const sortedGroups = useMemo(() => {
     if (!report) return [];
