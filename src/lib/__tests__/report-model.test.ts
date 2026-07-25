@@ -172,6 +172,9 @@ describe("mapInvoiceToLines", () => {
     inv.itemDetails = inv.details;
     delete inv.details;
     expect(mapInvoiceToLines(inv)).toHaveLength(1);
+  });
+
+
 
   // Anti-swap guardrail (Phase 3B Prerequisite Task 1). Locks the mapping so
   // beforeTax always comes from netAmount and includingTax from subAmount,
