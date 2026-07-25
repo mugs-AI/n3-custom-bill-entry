@@ -45,13 +45,7 @@ function EditPurchaseInvoicePage() {
 
   return (
     <AppShell>
-      <div className="mb-3 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Edit Purchase Invoice</h1>
-          <p className="text-sm text-muted-foreground">
-            Loaded live from N3 · changes save via <code>Update</code> on this document.
-          </p>
-        </div>
+      <div className="mb-3 flex items-center justify-end">
         <Link to="/history" className="app-btn">
           Back to History
         </Link>
