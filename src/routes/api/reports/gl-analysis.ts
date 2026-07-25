@@ -233,11 +233,33 @@ async function handle(request: Request): Promise<Response> {
     });
   }
 
-  // Step 3: map + aggregate.
+  // Step 3: map + aggregate. Any schema-mapping failure prevents partial
+  // totals (Task 4). We collect first-failure diagnostic then refuse.
   const allLines: GLDrillDownLine[] = [];
+  let mappedInvoiceCount = 0;
+  const mapFailures: string[] = [];
   for (const inv of details) {
     if (!inv) continue;
-    for (const line of mapInvoiceToLines(inv)) allLines.push(line);
+    try {
+      const rows = mapInvoiceToLines(inv);
+      for (const line of rows) allLines.push(line);
+      mappedInvoiceCount += 1;
+    } catch (err) {
+      const doc =
+        (typeof inv.docCode === "string" && inv.docCode) || (typeof inv.id === "string" && inv.id) || "(unknown)";
+      const msg = err instanceof Error ? err.message : "Unknown mapping error";
+      mapFailures.push(`${doc}: ${safeMessage(msg, "mapping failed")}`);
+    }
+  }
+  if (mapFailures.length > 0) {
+    const first = mapFailures[0];
+    return jsonRes(502, {
+      ok: false,
+      kind: "incomplete",
+      error: `GL Analysis could not map complete detail data for ${mapFailures.length} of ${total} Purchase Invoice${total === 1 ? "" : "s"}. No totals were produced. Please retry. First failure: ${first}`,
+      matchedInvoiceCount: total,
+      failedInvoiceCount: mapFailures.length,
+    });
   }
   const filtered = filterLines(allLines, criteria);
   const groups = aggregateByGL(filtered);
@@ -249,7 +271,7 @@ async function handle(request: Request): Promise<Response> {
     groups,
     lines: filtered,
     matchedInvoiceCount: total,
-    fetchedInvoiceCount: details.filter((x) => x != null).length,
+    fetchedInvoiceCount: mappedInvoiceCount,
     overLimit: false,
   };
   return jsonRes(200, { ok: true, report });
