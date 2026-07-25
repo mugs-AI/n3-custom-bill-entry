@@ -211,7 +211,7 @@ async function handle(request: Request): Promise<Response> {
       ? ((dataObj as { posting: unknown[] }).posting)
       : [];
 
-  const cancelledCount = detailItems.reduce((n, row) => {
+  const cancelledCount: number = detailItems.reduce<number>((n, row) => {
     if (row && typeof row === "object" && (row as { isCancelled?: unknown }).isCancelled === true) {
       return n + 1;
     }
