@@ -22,6 +22,12 @@
 
 import { round2, sumTo2dp } from "./money";
 import { escapeODataString } from "./history-query";
+import {
+  extractPurchaseInvoiceDetails,
+  PurchaseInvoiceMappingError,
+  type PurchaseInvoice,
+  type PurchaseInvoiceDetail,
+} from "./purchase-invoice";
 
 export const UNASSIGNED_CODE = "UNASSIGNED";
 export const UNASSIGNED_NAME = "(No GL Account)";
