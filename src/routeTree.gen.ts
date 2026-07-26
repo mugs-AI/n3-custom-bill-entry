@@ -15,6 +15,7 @@ import { Route as HistoryRouteImport } from './routes/history'
 import { Route as DevLoginRouteImport } from './routes/dev-login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ReportsPurchasebookProbeRouteImport } from './routes/reports_.purchasebook-probe'
+import { Route as ReportsPurchaseViewRouteImport } from './routes/reports_.purchase.$view'
 import { Route as PurchaseInvoicesIdEditRouteImport } from './routes/purchase-invoices.$id.edit'
 import { Route as ApiReportsPurchasebookProbeRouteImport } from './routes/api/reports/purchasebook-probe'
 import { Route as ApiReportsPurchaseAuditRouteImport } from './routes/api/reports/purchase-audit'
@@ -55,6 +56,11 @@ const ReportsPurchasebookProbeRoute =
     path: '/reports/purchasebook-probe',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ReportsPurchaseViewRoute = ReportsPurchaseViewRouteImport.update({
+  id: '/reports_/purchase/$view',
+  path: '/reports/purchase/$view',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PurchaseInvoicesIdEditRoute = PurchaseInvoicesIdEditRouteImport.update({
   id: '/purchase-invoices/$id/edit',
   path: '/purchase-invoices/$id/edit',
@@ -112,6 +118,7 @@ export interface FileRoutesByFullPath {
   '/api/reports/purchase-audit': typeof ApiReportsPurchaseAuditRoute
   '/api/reports/purchasebook-probe': typeof ApiReportsPurchasebookProbeRoute
   '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
+  '/reports/purchase/$view': typeof ReportsPurchaseViewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -128,6 +135,7 @@ export interface FileRoutesByTo {
   '/api/reports/purchase-audit': typeof ApiReportsPurchaseAuditRoute
   '/api/reports/purchasebook-probe': typeof ApiReportsPurchasebookProbeRoute
   '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
+  '/reports/purchase/$view': typeof ReportsPurchaseViewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -145,6 +153,7 @@ export interface FileRoutesById {
   '/api/reports/purchase-audit': typeof ApiReportsPurchaseAuditRoute
   '/api/reports/purchasebook-probe': typeof ApiReportsPurchasebookProbeRoute
   '/purchase-invoices/$id/edit': typeof PurchaseInvoicesIdEditRoute
+  '/reports_/purchase/$view': typeof ReportsPurchaseViewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -163,6 +172,7 @@ export interface FileRouteTypes {
     | '/api/reports/purchase-audit'
     | '/api/reports/purchasebook-probe'
     | '/purchase-invoices/$id/edit'
+    | '/reports/purchase/$view'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -179,6 +189,7 @@ export interface FileRouteTypes {
     | '/api/reports/purchase-audit'
     | '/api/reports/purchasebook-probe'
     | '/purchase-invoices/$id/edit'
+    | '/reports/purchase/$view'
   id:
     | '__root__'
     | '/'
@@ -195,6 +206,7 @@ export interface FileRouteTypes {
     | '/api/reports/purchase-audit'
     | '/api/reports/purchasebook-probe'
     | '/purchase-invoices/$id/edit'
+    | '/reports_/purchase/$view'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -212,6 +224,7 @@ export interface RootRouteChildren {
   ApiReportsPurchaseAuditRoute: typeof ApiReportsPurchaseAuditRoute
   ApiReportsPurchasebookProbeRoute: typeof ApiReportsPurchasebookProbeRoute
   PurchaseInvoicesIdEditRoute: typeof PurchaseInvoicesIdEditRoute
+  ReportsPurchaseViewRoute: typeof ReportsPurchaseViewRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -256,6 +269,13 @@ declare module '@tanstack/react-router' {
       path: '/reports/purchasebook-probe'
       fullPath: '/reports/purchasebook-probe'
       preLoaderRoute: typeof ReportsPurchasebookProbeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports_/purchase/$view': {
+      id: '/reports_/purchase/$view'
+      path: '/reports/purchase/$view'
+      fullPath: '/reports/purchase/$view'
+      preLoaderRoute: typeof ReportsPurchaseViewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/purchase-invoices/$id/edit': {
@@ -332,6 +352,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiReportsPurchaseAuditRoute: ApiReportsPurchaseAuditRoute,
   ApiReportsPurchasebookProbeRoute: ApiReportsPurchasebookProbeRoute,
   PurchaseInvoicesIdEditRoute: PurchaseInvoicesIdEditRoute,
+  ReportsPurchaseViewRoute: ReportsPurchaseViewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

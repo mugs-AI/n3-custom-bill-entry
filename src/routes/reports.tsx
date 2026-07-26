@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { SearchableSelect, type ComboOption } from "@/components/SearchableSelect";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
@@ -8,11 +8,13 @@ import { getToken } from "@/lib/auth-store";
 import { n3ListAll } from "@/lib/n3-client";
 import { getAuthScope } from "@/lib/draft-store";
 import { isoToMy, todayISOInKL } from "@/lib/date-my";
+import { reportCacheKey } from "@/lib/report-cache";
 import type {
   GLAccountSummary,
   ReportCriteria,
   ReportData,
 } from "@/lib/report-model";
+
 
 // GL Analysis / Purchase Audit Trail — Phase 3A.
 //
@@ -262,9 +264,15 @@ function ReportsPage() {
   const stockOpts = useMemo(() => toOptions(stocksQ.data), [toOptions, stocksQ.data]);
   const taxCodeOpts = useMemo(() => toOptions(taxCodesQ.data, true), [toOptions, taxCodesQ.data]);
 
+  const queryClient = useQueryClient();
   const mutation = useMutation({
     mutationFn: fetchReport,
     retry: false,
+    onSuccess: (report, filter) => {
+      // Seed the shared cache so Phase 3B report views can read this
+      // inquiry without a second fetch.
+      queryClient.setQueryData(reportCacheKey(filter), report);
+    },
   });
 
   const runInquiry = useCallback(() => {
@@ -272,6 +280,7 @@ function ReportsPage() {
     mutation.mutate(inquiry.filter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inquiry.filter]);
+
 
   const clearAll = useCallback(() => {
     const d = defaultInquiry();
@@ -328,13 +337,11 @@ function ReportsPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <Link to="/reports/purchasebook-probe" className="app-btn">
-              PurchaseBook Probe
-            </Link>
             <div className="text-xs text-muted-foreground">
               Cancelled/voided Purchase Invoices are excluded.
             </div>
           </div>
+
         </div>
 
         <form
@@ -508,6 +515,7 @@ function ReportsPage() {
         ) : report ? (
           <>
             <SummaryCards report={report} />
+            <PurchaseReportLauncher />
             <GLTable
               groups={sortedGroups}
               sortKey={inquiry.sortKey}
@@ -547,6 +555,44 @@ function ReportsPage() {
     </AppShell>
   );
 }
+
+const REPORT_LINKS: { view: string; label: string }[] = [
+  { view: "audit-trail", label: "Purchase Audit Trail" },
+  { view: "posting-account", label: "Posting Account Summary" },
+  { view: "wbs", label: "Summary of WBS" },
+  { view: "hq-sequence", label: "Summary of HQ Sequence" },
+  { view: "cost-centre", label: "Summary of Cost Centre" },
+  { view: "order-number", label: "Summary of Order Number" },
+  { view: "payment-type", label: "Summary of Payment Type" },
+  { view: "hq-tax", label: "Summary of HQ Tax" },
+];
+
+function PurchaseReportLauncher() {
+  return (
+    <div className="app-card p-3">
+      <div className="mb-2 text-[10px] font-semibold uppercase text-muted-foreground">
+        Purchase Reports
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {REPORT_LINKS.map((l) => (
+          <Link
+            key={l.view}
+            to="/reports/purchase/$view"
+            params={{ view: l.view }}
+            className="app-btn text-[12px]"
+          >
+            {l.label}
+          </Link>
+        ))}
+      </div>
+      <div className="mt-2 text-[11px] text-muted-foreground">
+        Each report reuses this inquiry's filters and data. Change filters and re-run to
+        refresh.
+      </div>
+    </div>
+  );
+}
+
 
 function keyMap(k: SortKey): keyof GLAccountSummary {
   if (k === "code") return "glAccountCode";
