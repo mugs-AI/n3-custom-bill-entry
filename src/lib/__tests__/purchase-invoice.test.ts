@@ -99,9 +99,9 @@ const MAIN_INVOICE_ENVELOPE = {
         description: "Line 3",
         qty: 1,
         unitPrice: 400,
-        netAmount: 40,
-        taxAmount: 440,
         subAmount: 400,
+        taxAmount: 40,
+        netAmount: 440,
       },
     ],
     details: [], // BillDetailDto side is empty — this used to cause "0 lines"
