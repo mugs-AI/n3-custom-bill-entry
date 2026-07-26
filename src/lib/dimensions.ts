@@ -229,3 +229,22 @@ export function totalOf(rows: DimensionRow[]): {
     includingTax: sumTo2dp(rows.map((r) => r.includingTax)),
   };
 }
+
+/**
+ * Correction A Task 5: for a given dimension row (identified by its stable
+ * `key`), return the underlying non-cancelled GL lines that contributed to
+ * that bucket. Uses only the already-normalized lines — zero N3 calls.
+ */
+export function linesForRow(
+  lines: GLDrillDownLine[],
+  dim: DimensionKey,
+  rowKey: string,
+): GLDrillDownLine[] {
+  const spec = DIMENSION_SPECS[dim];
+  return lines.filter((l) => {
+    if (l.isCancelled) return false;
+    const got = spec.extract(l);
+    if (!got) return rowKey === BLANK_KEY;
+    return got.key === rowKey;
+  });
+}
