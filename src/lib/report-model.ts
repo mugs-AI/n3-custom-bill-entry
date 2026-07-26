@@ -277,14 +277,18 @@ export function mapInvoiceToLines(inv: PurchaseInvoice): GLDrillDownLine[] {
   const paymentType = inv.term?.description ?? inv.term?.code ?? "";
   const out: GLDrillDownLine[] = [];
   details.forEach((d, i) => {
-    const beforeTax = round2(typeof d.netAmount === "number" ? d.netAmount : 0);
-    const taxAmount = round2(typeof d.taxAmount === "number" ? d.taxAmount : 0);
-    // Prefer stored subAmount (Tax-Inclusive documents already have it), fall
-    // back to net+tax so reconciliation always holds.
-    const including =
-      typeof d.subAmount === "number" && Number.isFinite(d.subAmount)
-        ? round2(d.subAmount)
-        : round2(beforeTax + taxAmount);
+    // Observed N3 PurchaseInvoiceDetailDto semantics (Phase 3B Prerequisite
+    // Correction A): beforeTax <- subAmount, taxAmount <- taxAmount,
+    // includingTax <- netAmount. Use nullish checks so a genuine 0 is kept.
+    const sub =
+      typeof d.subAmount === "number" && Number.isFinite(d.subAmount) ? d.subAmount : null;
+    const net =
+      typeof d.netAmount === "number" && Number.isFinite(d.netAmount) ? d.netAmount : null;
+    const tax =
+      typeof d.taxAmount === "number" && Number.isFinite(d.taxAmount) ? d.taxAmount : 0;
+    const taxAmount = round2(tax);
+    const beforeTax = round2(sub != null ? sub : net != null ? net - tax : 0);
+    const including = round2(net != null ? net : sub != null ? sub + tax : 0);
     const glCode = d.account?.code ?? "";
     const glName = d.account?.name ?? d.accountName ?? "";
     out.push({

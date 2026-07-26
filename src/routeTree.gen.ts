@@ -14,7 +14,7 @@ import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as HistoryRouteImport } from './routes/history'
 import { Route as DevLoginRouteImport } from './routes/dev-login'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ReportsPurchasebookProbeRouteImport } from './routes/reports.purchasebook-probe'
+import { Route as ReportsPurchasebookProbeRouteImport } from './routes/reports_.purchasebook-probe'
 import { Route as PurchaseInvoicesIdEditRouteImport } from './routes/purchase-invoices.$id.edit'
 import { Route as ApiReportsPurchasebookProbeRouteImport } from './routes/api/reports/purchasebook-probe'
 import { Route as ApiReportsGlAnalysisRouteImport } from './routes/api/reports/gl-analysis'
@@ -50,9 +50,9 @@ const IndexRoute = IndexRouteImport.update({
 } as any)
 const ReportsPurchasebookProbeRoute =
   ReportsPurchasebookProbeRouteImport.update({
-    id: '/purchasebook-probe',
-    path: '/purchasebook-probe',
-    getParentRoute: () => ReportsRoute,
+    id: '/reports_/purchasebook-probe',
+    path: '/reports/purchasebook-probe',
+    getParentRoute: () => rootRouteImport,
   } as any)
 const PurchaseInvoicesIdEditRoute = PurchaseInvoicesIdEditRouteImport.update({
   id: '/purchase-invoices/$id/edit',
@@ -95,7 +95,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dev-login': typeof DevLoginRoute
   '/history': typeof HistoryRoute
-  '/reports': typeof ReportsRouteWithChildren
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/reports/purchasebook-probe': typeof ReportsPurchasebookProbeRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
@@ -110,7 +110,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dev-login': typeof DevLoginRoute
   '/history': typeof HistoryRoute
-  '/reports': typeof ReportsRouteWithChildren
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/reports/purchasebook-probe': typeof ReportsPurchasebookProbeRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
@@ -126,9 +126,9 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dev-login': typeof DevLoginRoute
   '/history': typeof HistoryRoute
-  '/reports': typeof ReportsRouteWithChildren
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
-  '/reports/purchasebook-probe': typeof ReportsPurchasebookProbeRoute
+  '/reports_/purchasebook-probe': typeof ReportsPurchasebookProbeRoute
   '/api/auth/dev-connect': typeof ApiAuthDevConnectRoute
   '/api/bills/create': typeof ApiBillsCreateRoute
   '/api/bills/update': typeof ApiBillsUpdateRoute
@@ -175,7 +175,7 @@ export interface FileRouteTypes {
     | '/history'
     | '/reports'
     | '/settings'
-    | '/reports/purchasebook-probe'
+    | '/reports_/purchasebook-probe'
     | '/api/auth/dev-connect'
     | '/api/bills/create'
     | '/api/bills/update'
@@ -189,8 +189,9 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DevLoginRoute: typeof DevLoginRoute
   HistoryRoute: typeof HistoryRoute
-  ReportsRoute: typeof ReportsRouteWithChildren
+  ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
+  ReportsPurchasebookProbeRoute: typeof ReportsPurchasebookProbeRoute
   ApiAuthDevConnectRoute: typeof ApiAuthDevConnectRoute
   ApiBillsCreateRoute: typeof ApiBillsCreateRoute
   ApiBillsUpdateRoute: typeof ApiBillsUpdateRoute
@@ -237,12 +238,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/reports/purchasebook-probe': {
-      id: '/reports/purchasebook-probe'
-      path: '/purchasebook-probe'
+    '/reports_/purchasebook-probe': {
+      id: '/reports_/purchasebook-probe'
+      path: '/reports/purchasebook-probe'
       fullPath: '/reports/purchasebook-probe'
       preLoaderRoute: typeof ReportsPurchasebookProbeRouteImport
-      parentRoute: typeof ReportsRoute
+      parentRoute: typeof rootRouteImport
     }
     '/purchase-invoices/$id/edit': {
       id: '/purchase-invoices/$id/edit'
@@ -296,23 +297,13 @@ declare module '@tanstack/react-router' {
   }
 }
 
-interface ReportsRouteChildren {
-  ReportsPurchasebookProbeRoute: typeof ReportsPurchasebookProbeRoute
-}
-
-const ReportsRouteChildren: ReportsRouteChildren = {
-  ReportsPurchasebookProbeRoute: ReportsPurchasebookProbeRoute,
-}
-
-const ReportsRouteWithChildren =
-  ReportsRoute._addFileChildren(ReportsRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DevLoginRoute: DevLoginRoute,
   HistoryRoute: HistoryRoute,
-  ReportsRoute: ReportsRouteWithChildren,
+  ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
+  ReportsPurchasebookProbeRoute: ReportsPurchasebookProbeRoute,
   ApiAuthDevConnectRoute: ApiAuthDevConnectRoute,
   ApiBillsCreateRoute: ApiBillsCreateRoute,
   ApiBillsUpdateRoute: ApiBillsUpdateRoute,
