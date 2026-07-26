@@ -43,6 +43,7 @@ import {
   type PurchaseAuditResult,
 } from "@/lib/audit-trail";
 import type { PurchaseBookNormalized } from "@/lib/purchase-book";
+import { canonicalDocCode } from "@/lib/report-keys";
 
 // ----- Route --------------------------------------------------------------
 
