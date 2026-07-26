@@ -309,6 +309,18 @@ async function handle(request: Request): Promise<Response> {
     else gl.push(...r.rows);
   }
 
+  const piDocSample = [
+    ...new Set(req.piDocCodes.map(canonicalDocCode).filter(Boolean)),
+  ].slice(0, 3);
+  const pbDocSample = [
+    ...new Set(
+      pb.detailItems
+        .filter((d) => !d.isCancelled)
+        .map((d) => canonicalDocCode(d.docCode))
+        .filter(Boolean),
+    ),
+  ].slice(0, 3);
+
   return jsonRes(200, {
     ok: true,
     pb,
@@ -319,6 +331,8 @@ async function handle(request: Request): Promise<Response> {
       pbDetailItems: pb.detailItems.length,
       pbPostingSummary: pb.postingSummary.length,
       glRowsFetched: gl.length,
+      piDocSample,
+      pbDocSample,
     },
   });
 }
