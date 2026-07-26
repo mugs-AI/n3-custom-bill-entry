@@ -1,19 +1,15 @@
 // Phase 3B Views 1-2 accounting endpoint.
 //
-// Given the same GL Analysis criteria + the current audit doc-code set,
-// fetch:
-//   - N3 Reporting PurchaseBook (for header context + posting summary)
-//   - N3 Reporting GeneralLedger transaction rows for the account codes
-//     that appear in the posting summary
-// and return the sanitized, contract-checked result. This route performs
-// zero writes.
+// Correction A Task 1: the previous version called the undocumented
+//   POST /api/reporting/GeneralLedger
+// which returns HTTP 404. The correct N3 endpoint is:
+//   POST /api/reporting/GeneralLedger/QueryTransactionLines
+//     ?$top=500&$skip=<offset>
+// with body { accountCode, filter{...} } and envelope { data.count, data.value[] }.
 //
-// Contract handling:
-//   - If PurchaseBook returns an unrecognised shape → 502 kind:"incomplete".
-//   - If the GL response for any candidate account is malformed → 502
-//     kind:"incomplete" (no partial totals).
-//   - Otherwise return { ok, pb, gl, docCodes, meta } for the client to
-//     reconcile via reconcileAudit() and render.
+// GL fetches run behind a 3-worker pool. Within each account, pages are
+// requested serially until `skip >= count`. The bearer token is never echoed
+// back to the browser and upstream error messages are sanitized.
 
 import { createFileRoute } from "@tanstack/react-router";
 import {
@@ -24,9 +20,10 @@ import {
 } from "@/lib/purchase-book";
 import type { GLRow } from "@/lib/audit-trail";
 
-const MAIN_DEFAULT = "https://openapi.account.qne.cloud";
 const REPORTING_DEFAULT = "https://openapi-reporting.account.qne.cloud";
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const GL_PAGE_SIZE = 500;
+const GL_WORKERS = 3;
 
 interface Reply {
   ok: boolean;
@@ -63,7 +60,10 @@ async function postJson(
   url: string,
   token: string,
   body: unknown,
-): Promise<{ ok: true; status: number; parsed: unknown } | { ok: false; status: number; message: string }> {
+): Promise<
+  | { ok: true; status: number; parsed: unknown }
+  | { ok: false; status: number; message: string }
+> {
   let res: Response;
   try {
     res = await fetch(url, {
@@ -92,9 +92,9 @@ async function postJson(
   }
   if (!res.ok) {
     const msg = safeMessage(
-      (parsed && typeof parsed === "object" && "message" in (parsed as object)
+      parsed && typeof parsed === "object" && "message" in (parsed as object)
         ? String((parsed as { message?: unknown }).message ?? "")
-        : ""),
+        : "",
       `Upstream HTTP ${res.status}`,
     );
     return { ok: false, status: res.status, message: msg };
@@ -124,11 +124,6 @@ function parseBody(raw: unknown): AuditRequest | { error: string } {
   return { dateFrom, dateTo, piDocCodes };
 }
 
-/**
- * POST /api/reporting/PurchaseBook with a minimal all-inclusive filter.
- * Cancelled documents are intentionally requested (`exDoc:false`) so the
- * client can compare against the excluded-cancelled PI set.
- */
 async function fetchPurchaseBook(
   base: string,
   token: string,
@@ -168,74 +163,57 @@ async function fetchPurchaseBook(
 }
 
 /**
- * POST /api/reporting/GeneralLedger for a specific account-code range.
- *
- * Returns a flat GLRow[] normalized from either:
- *   - envelope.data = GLRow[]
- *   - envelope.data = { data: GLRow[] }             (LoadResult)
- *   - envelope.data = { reportModel: [{ transactions: GLRow[] }] }
- * Any unrecognised shape returns { ok: false }.
+ * Fetch every GL transaction line for a single account code, paging through
+ * the documented `{ count, value[] }` envelope at 500 rows per request.
+ * Account codes (e.g. `800-C001`) are opaque strings — never numeric IDs.
  */
-async function fetchGL(
+async function fetchGLForAccount(
   base: string,
   token: string,
   req: AuditRequest,
   accountCode: string,
 ): Promise<{ ok: true; rows: GLRow[] } | { ok: false; message: string }> {
-  const payload = {
-    filter: {
-      dateFrom: `${req.dateFrom}T00:00:00`,
-      dateTo: `${req.dateTo}T23:59:59`,
-      accountFrom: accountCode,
-      accountTo: accountCode,
-      currencyFrom: null,
-      currencyTo: null,
-      projectFrom: null,
-      projectTo: null,
-      areaFrom: null,
-      areaTo: null,
-      exDoc: false,
-      build: null,
-      projectIds: [] as number[],
-      projOption: -2,
-    },
-    options: null,
-  };
-  const res = await postJson(`${base}/api/reporting/GeneralLedger`, token, payload);
-  if (!res.ok) return { ok: false, message: res.message };
-  const parsed = res.parsed as { data?: unknown } | null;
-  const data = parsed && typeof parsed === "object" && "data" in parsed ? parsed.data : parsed;
   const rows: GLRow[] = [];
-  const push = (r: unknown) => {
-    if (!r || typeof r !== "object") return;
-    rows.push(r as GLRow);
-  };
-  if (Array.isArray(data)) {
-    for (const item of data) {
-      if (item && typeof item === "object" && Array.isArray((item as { transactions?: unknown[] }).transactions)) {
-        for (const t of (item as { transactions: unknown[] }).transactions) push(t);
-      } else push(item);
+  let skip = 0;
+  // Hard safety cap: 500 pages * 500 rows = 250k lines per account.
+  for (let page = 0; page < 500; page++) {
+    const url =
+      `${base}/api/reporting/GeneralLedger/QueryTransactionLines` +
+      `?%24top=${GL_PAGE_SIZE}&%24skip=${skip}`;
+    const body = {
+      accountCode,
+      filter: {
+        dateFrom: `${req.dateFrom}T00:00:00`,
+        dateTo: `${req.dateTo}T23:59:59`,
+        accountFrom: null,
+        accountTo: null,
+        accountCodes: null,
+        build: null,
+        projectIds: [] as number[],
+        projOption: -2,
+        sortBy: null,
+        includeZero: false,
+        includeDACandCCAC: false,
+      },
+    };
+    const res = await postJson(url, token, body);
+    if (!res.ok) return { ok: false, message: `HTTP ${res.status} — ${res.message}` };
+
+    const parsed = res.parsed as { data?: { count?: number; value?: unknown[] } } | null;
+    const data = parsed && typeof parsed === "object" ? parsed.data : null;
+    if (!data || typeof data !== "object") {
+      return { ok: false, message: "envelope missing data.value / data.count" };
     }
-  } else if (data && typeof data === "object") {
-    const inner = (data as { data?: unknown; reportModel?: unknown; transactions?: unknown }).data;
-    const rm = (data as { reportModel?: unknown }).reportModel;
-    const tx = (data as { transactions?: unknown }).transactions;
-    if (Array.isArray(inner)) inner.forEach(push);
-    else if (Array.isArray(rm))
-      for (const item of rm) {
-        if (item && typeof item === "object" && Array.isArray((item as { transactions?: unknown[] }).transactions))
-          for (const t of (item as { transactions: unknown[] }).transactions) push(t);
-      }
-    else if (Array.isArray(tx)) tx.forEach(push);
-    else
-      return {
-        ok: false,
-        message: `GeneralLedger contract mismatch for account ${accountCode}`,
-      };
-  } else if (data == null) {
-    return { ok: true, rows: [] };
-  } else {
-    return { ok: false, message: `GeneralLedger returned unrecognised shape for ${accountCode}` };
+    const value = Array.isArray(data.value) ? data.value : null;
+    const count = typeof data.count === "number" ? data.count : null;
+    if (!value || count == null) {
+      return { ok: false, message: "envelope missing data.value / data.count" };
+    }
+    for (const r of value) {
+      if (r && typeof r === "object") rows.push(r as GLRow);
+    }
+    skip += value.length;
+    if (value.length === 0 || skip >= count) break;
   }
   return { ok: true, rows };
 }
@@ -254,6 +232,26 @@ function candidateAccountCodes(
     if (c) out.add(c);
   }
   return [...out].sort();
+}
+
+/** Simple pool: at most `limit` workers concurrent over `items`. */
+async function pool<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+  const run = async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      out[i] = await worker(items[i], i);
+    }
+  };
+  const runners = Array.from({ length: Math.max(1, Math.min(limit | 0, items.length)) }, run);
+  await Promise.all(runners);
+  return out;
 }
 
 async function handle(request: Request): Promise<Response> {
@@ -275,7 +273,6 @@ async function handle(request: Request): Promise<Response> {
   const req = parsed;
 
   const reportingBase = process.env.OPEN_API_REPORTING_BASE_URL || REPORTING_DEFAULT;
-  void (process.env.OPEN_API_BASE_URL || MAIN_DEFAULT);
 
   const pbResult = await fetchPurchaseBook(reportingBase, token, req);
   if (!pbResult.ok)
@@ -283,16 +280,19 @@ async function handle(request: Request): Promise<Response> {
   const pb = pbResult.pb;
 
   const codes = candidateAccountCodes(pb.detailItems, pb.postingSummary);
+  const perAccount = await pool(codes, GL_WORKERS, (code) =>
+    fetchGLForAccount(reportingBase, token, req, code).then((r) => ({ code, r })),
+  );
   const gl: GLRow[] = [];
   const emptyAccounts: string[] = [];
-  for (const code of codes) {
-    const r = await fetchGL(reportingBase, token, req, code);
-    if (!r.ok)
+  for (const { code, r } of perAccount) {
+    if (!r.ok) {
       return jsonRes(502, {
         ok: false,
         kind: "incomplete",
         error: `Could not fetch GL rows for account ${code}: ${r.message}`,
       });
+    }
     if (r.rows.length === 0) emptyAccounts.push(code);
     else gl.push(...r.rows);
   }

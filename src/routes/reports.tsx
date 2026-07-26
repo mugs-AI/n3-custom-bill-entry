@@ -8,7 +8,11 @@ import { getToken } from "@/lib/auth-store";
 import { n3ListAll } from "@/lib/n3-client";
 import { getAuthScope } from "@/lib/draft-store";
 import { isoToMy, todayISOInKL } from "@/lib/date-my";
-import { reportCacheKey } from "@/lib/report-cache";
+import {
+  reportCacheKey,
+  saveReportSnapshot,
+  loadReportSnapshot,
+} from "@/lib/report-cache";
 import type {
   GLAccountSummary,
   ReportCriteria,
@@ -265,13 +269,35 @@ function ReportsPage() {
   const taxCodeOpts = useMemo(() => toOptions(taxCodesQ.data, true), [toOptions, taxCodesQ.data]);
 
   const queryClient = useQueryClient();
+
+  // Correction A Task 2: on mount rehydrate the completed inquiry from
+  // sessionStorage so a refresh (or return from an edit route) doesn't lose
+  // it. The observer useQuery below keeps the entry alive indefinitely so
+  // Purchase Report views never see "No inquiry loaded" once run.
+  useEffect(() => {
+    if (!hydrated) return;
+    const snap = loadReportSnapshot();
+    if (snap) {
+      queryClient.setQueryData(reportCacheKey(snap.filter), snap.report);
+    }
+  }, [hydrated, queryClient]);
+
+  const cachedReportQ = useQuery<ReportData | null>({
+    queryKey: reportCacheKey(inquiry.filter),
+    // Keep the entry alive; the setter below is the only writer.
+    queryFn: () => Promise.resolve(null as unknown as ReportData),
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
   const mutation = useMutation({
     mutationFn: fetchReport,
     retry: false,
     onSuccess: (report, filter) => {
-      // Seed the shared cache so Phase 3B report views can read this
-      // inquiry without a second fetch.
       queryClient.setQueryData(reportCacheKey(filter), report);
+      // Persist for cross-refresh + cross-navigation restoration.
+      saveReportSnapshot(filter, report);
     },
   });
 
@@ -288,7 +314,7 @@ function ReportsPage() {
     mutation.reset();
   }, [mutation]);
 
-  const report = mutation.data ?? null;
+  const report = mutation.data ?? cachedReportQ.data ?? null;
   const err = mutation.error as
     | (Error & { kind?: string; matchedInvoiceCount?: number; failedInvoiceCount?: number })
     | null;

@@ -97,13 +97,17 @@ export const DIMENSION_SPECS: Record<DimensionKey, DimensionSpec> = {
     title: "Summary of Order Number",
     source: "N3 Tariff Codes",
     codeHeader: "Tariff Code",
-    descriptionHeader: "Description",
+    descriptionHeader: "Tariff Description",
     extract: (l) => {
-      // Tariff/order fields are optional on the mapped line — surface via
-      // referenceNo as the visible "Order No." if no tariff was captured.
-      const code = l.referenceNo || "";
-      if (!code) return null;
-      return { key: `text:${code}`, code, description: "" };
+      // Correction A Task 4: group strictly on the immutable Tariff Code ID
+      // captured from PurchaseInvoiceDetailDto.tariffCodeId. Reference No.
+      // (freeform order text) is unrelated and must never be a fallback.
+      if (l.tariffCodeId == null && !l.tariffCode) return null;
+      return {
+        key: l.tariffCodeId != null ? `id:${l.tariffCodeId}` : `code:${l.tariffCode}`,
+        code: l.tariffCode,
+        description: l.tariffDescription,
+      };
     },
   },
   "payment-type": {
@@ -113,11 +117,17 @@ export const DIMENSION_SPECS: Record<DimensionKey, DimensionSpec> = {
     codeHeader: "Purchaser Code",
     descriptionHeader: "Purchaser Name",
     extract: (l) => {
-      if (!l.purchaserCode && !l.purchaserName && !l.paymentType) return null;
+      // Correction A Task 3: group strictly on the immutable Purchaser ID.
+      // Term / paymentType is a separate concept and must never leak in as
+      // a synthetic key or a display fallback.
+      if (l.purchaserId == null && !l.purchaserCode && !l.purchaserName) return null;
       return {
-        key: `code:${l.purchaserCode || l.paymentType || l.purchaserName}`,
+        key:
+          l.purchaserId != null
+            ? `id:${l.purchaserId}`
+            : `code:${l.purchaserCode || l.purchaserName}`,
         code: l.purchaserCode,
-        description: l.purchaserName || l.paymentType,
+        description: l.purchaserName,
       };
     },
   },
@@ -218,4 +228,23 @@ export function totalOf(rows: DimensionRow[]): {
     taxAmount: sumTo2dp(rows.map((r) => r.taxAmount)),
     includingTax: sumTo2dp(rows.map((r) => r.includingTax)),
   };
+}
+
+/**
+ * Correction A Task 5: for a given dimension row (identified by its stable
+ * `key`), return the underlying non-cancelled GL lines that contributed to
+ * that bucket. Uses only the already-normalized lines — zero N3 calls.
+ */
+export function linesForRow(
+  lines: GLDrillDownLine[],
+  dim: DimensionKey,
+  rowKey: string,
+): GLDrillDownLine[] {
+  const spec = DIMENSION_SPECS[dim];
+  return lines.filter((l) => {
+    if (l.isCancelled) return false;
+    const got = spec.extract(l);
+    if (!got) return rowKey === BLANK_KEY;
+    return got.key === rowKey;
+  });
 }

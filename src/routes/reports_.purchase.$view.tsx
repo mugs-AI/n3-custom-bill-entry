@@ -14,7 +14,7 @@
 //   between the two accounting views.
 
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
@@ -22,16 +22,19 @@ import { getToken } from "@/lib/auth-store";
 import { getAuthScope } from "@/lib/draft-store";
 import { isoToMy } from "@/lib/date-my";
 import { round2, sumTo2dp } from "@/lib/money";
+import { n3ListAll } from "@/lib/n3-client";
 import {
   DIMENSION_SPECS,
+  BLANK_KEY,
   BLANK_LABEL,
   groupByDimension,
+  linesForRow,
   totalOf,
   type DimensionKey,
   type DimensionRow,
 } from "@/lib/dimensions";
-import type { ReportCriteria, ReportData } from "@/lib/report-model";
-import { reportCacheKey } from "@/lib/report-cache";
+import type { GLDrillDownLine, ReportCriteria, ReportData } from "@/lib/report-model";
+import { loadReportSnapshot, reportCacheKey } from "@/lib/report-cache";
 import {
   reconcileAudit,
   type AuditDocument,
@@ -178,10 +181,71 @@ function PurchaseReportPage() {
   const queryClient = useQueryClient();
 
   const inquiry = useMemo(() => (hydrated ? loadInquiry() : null), [hydrated]);
-  const cached = useMemo<ReportData | undefined>(() => {
-    if (!inquiry) return undefined;
-    return queryClient.getQueryData<ReportData>(reportCacheKey(inquiry.filter));
-  }, [queryClient, inquiry]);
+
+  // Correction A Task 2: rehydrate the completed inquiry into the shared
+  // React Query cache on mount, so a refresh or direct-open of this route
+  // sees the previous inquiry even after GL Analysis unmounted and its
+  // default gcTime elapsed.
+  useEffect(() => {
+    if (!hydrated) return;
+    const snap = loadReportSnapshot();
+    if (snap) {
+      queryClient.setQueryData(reportCacheKey(snap.filter), snap.report);
+    }
+  }, [hydrated, queryClient]);
+
+  // Observer keeps the cache entry alive as long as this page is mounted.
+  const cachedQ = useQuery<ReportData | null>({
+    queryKey: inquiry ? reportCacheKey(inquiry.filter) : ["report", "gl-analysis", "none"],
+    queryFn: () => Promise.resolve(null as unknown as ReportData),
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
+  // Correction A Task 4: tariff master (client-side hydration) so lines
+  // captured before Detail hydration still show Tariff Code + Description.
+  const tariffQ = useQuery({
+    queryKey: ["n3", "tariffCodes"],
+    enabled: hydrated && !!token,
+    queryFn: ({ signal }) =>
+      n3ListAll<{ id: number; code?: string; description?: string }>(
+        "api/TariffCodes/Query",
+        { pageSize: 500, signal },
+      ),
+    staleTime: 5 * 60_000,
+    retry: (c) => c < 1,
+  });
+  const tariffMap = useMemo(() => {
+    const m = new Map<number, { code: string; description: string }>();
+    for (const r of tariffQ.data ?? []) {
+      m.set(r.id, { code: r.code ?? "", description: r.description ?? "" });
+    }
+    return m;
+  }, [tariffQ.data]);
+
+  const rawCached = cachedQ.data ?? null;
+  const cached = useMemo<ReportData | null>(() => {
+    if (!rawCached) return null;
+    if (tariffMap.size === 0) return rawCached;
+    // Enrich only lines missing Tariff Code / Description but carrying an ID.
+    let mutated = false;
+    const lines = rawCached.lines.map((l) => {
+      if (l.tariffCodeId != null && (!l.tariffCode || !l.tariffDescription)) {
+        const hit = tariffMap.get(l.tariffCodeId);
+        if (hit) {
+          mutated = true;
+          return {
+            ...l,
+            tariffCode: l.tariffCode || hit.code,
+            tariffDescription: l.tariffDescription || hit.description,
+          };
+        }
+      }
+      return l;
+    });
+    return mutated ? { ...rawCached, lines } : rawCached;
+  }, [rawCached, tariffMap]);
 
   const piDocCodes = useMemo(() => {
     if (!cached) return [] as string[];
@@ -339,45 +403,68 @@ function DimensionView({ view, report }: { view: DimensionKey; report: ReportDat
     round2(Math.abs(totals.taxAmount - glTotals.taxAmount)) < 0.011 &&
     round2(Math.abs(totals.includingTax - glTotals.includingTax)) < 0.011;
 
+  // Correction A Task 5: one row can be expanded at a time; the drilled-in
+  // detail panel renders directly below the summary table and is hidden in
+  // print via the .no-print utility so hard copies stay one clean summary.
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const drillLines = useMemo(
+    () => (expandedKey ? linesForRow(report.lines, view, expandedKey) : []),
+    [expandedKey, report.lines, view],
+  );
+  const drillRow = expandedKey ? rows.find((r) => r.key === expandedKey) ?? null : null;
+
   return (
-    <div className="app-card overflow-x-auto p-3">
+    <div className="app-card p-3">
       <div className="mb-2 text-[11px] text-muted-foreground">
         Source: {spec.source}. {rows.length} row{rows.length === 1 ? "" : "s"}.
       </div>
-      <table className="w-full min-w-[800px] text-left text-sm">
-        <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
-          <tr>
-            <Th>{spec.codeHeader}</Th>
-            <Th>{spec.descriptionHeader}</Th>
-            <Th className="text-right">Invoices</Th>
-            <Th className="text-right">Lines</Th>
-            <Th className="text-right">Before Tax</Th>
-            <Th className="text-right">Tax</Th>
-            <Th className="text-right">Including Tax</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[800px] text-left text-sm">
+          <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
             <tr>
-              <Td colSpan={7} className="text-center text-muted-foreground">
-                No data.
-              </Td>
+              <Th>{spec.codeHeader}</Th>
+              <Th>{spec.descriptionHeader}</Th>
+              <Th className="text-right">Invoices</Th>
+              <Th className="text-right">Lines</Th>
+              <Th className="text-right">Before Tax</Th>
+              <Th className="text-right">Tax</Th>
+              <Th className="text-right">Including Tax</Th>
+              <Th className="no-print" />
             </tr>
-          ) : (
-            rows.map((r) => <DimensionRowView key={r.key} row={r} />)
-          )}
-        </tbody>
-        <tfoot className="bg-surface-2 text-[12px]">
-          <tr>
-            <Td colSpan={4} className="text-right font-semibold">
-              Total
-            </Td>
-            <Td className="tabular text-right font-semibold">{fmt(totals.beforeTax)}</Td>
-            <Td className="tabular text-right font-semibold">{fmt(totals.taxAmount)}</Td>
-            <Td className="tabular text-right font-semibold">{fmt(totals.includingTax)}</Td>
-          </tr>
-        </tfoot>
-      </table>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <Td colSpan={8} className="text-center text-muted-foreground">
+                  No data.
+                </Td>
+              </tr>
+            ) : (
+              rows.map((r) => (
+                <DimensionRowView
+                  key={r.key}
+                  row={r}
+                  expanded={expandedKey === r.key}
+                  onDrill={() =>
+                    setExpandedKey((cur) => (cur === r.key ? null : r.key))
+                  }
+                />
+              ))
+            )}
+          </tbody>
+          <tfoot className="bg-surface-2 text-[12px]">
+            <tr>
+              <Td colSpan={4} className="text-right font-semibold">
+                Total
+              </Td>
+              <Td className="tabular text-right font-semibold">{fmt(totals.beforeTax)}</Td>
+              <Td className="tabular text-right font-semibold">{fmt(totals.taxAmount)}</Td>
+              <Td className="tabular text-right font-semibold">{fmt(totals.includingTax)}</Td>
+              <Td className="no-print" />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
       <div
         className={`mt-2 text-[11px] ${reconciles ? "text-success" : "text-destructive"}`}
       >
@@ -385,21 +472,138 @@ function DimensionView({ view, report }: { view: DimensionKey; report: ReportDat
           ? "Reconciles with GL Analysis totals."
           : "Does not reconcile with GL Analysis totals — please re-run the inquiry."}
       </div>
+      {drillRow && (
+        <div className="no-print mt-3">
+          <DimensionDrillPanel
+            spec={{
+              codeHeader: spec.codeHeader,
+              descriptionHeader: spec.descriptionHeader,
+            }}
+            row={drillRow}
+            lines={drillLines}
+            onClose={() => setExpandedKey(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function DimensionRowView({ row }: { row: DimensionRow }) {
+function DimensionRowView({
+  row,
+  expanded,
+  onDrill,
+}: {
+  row: DimensionRow;
+  expanded: boolean;
+  onDrill: () => void;
+}) {
+  const isBlank = row.key === BLANK_KEY;
   return (
-    <tr className="border-t border-border/60">
-      <Td className="font-medium">{row.code || (row.description === BLANK_LABEL ? "" : row.code)}</Td>
-      <Td>{row.description || (!row.code ? BLANK_LABEL : "")}</Td>
+    <tr
+      className={`border-t border-border/60 ${expanded ? "bg-primary/5" : ""}`}
+    >
+      <Td className="font-medium">{isBlank ? "" : row.code}</Td>
+      <Td>{isBlank ? BLANK_LABEL : row.description}</Td>
       <Td className="tabular text-right">{row.invoiceCount}</Td>
       <Td className="tabular text-right">{row.lineCount}</Td>
       <Td className="tabular text-right">{fmt(row.beforeTax)}</Td>
       <Td className="tabular text-right">{fmt(row.taxAmount)}</Td>
       <Td className="tabular text-right">{fmt(row.includingTax)}</Td>
+      <Td className="no-print">
+        <button type="button" className="app-btn" onClick={onDrill}>
+          {expanded ? "Hide" : "Drill"}
+        </button>
+      </Td>
     </tr>
+  );
+}
+
+function DimensionDrillPanel({
+  spec,
+  row,
+  lines,
+  onClose,
+}: {
+  spec: { codeHeader: string; descriptionHeader: string };
+  row: DimensionRow;
+  lines: GLDrillDownLine[];
+  onClose: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-surface p-3">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <div className="text-[10px] font-semibold uppercase text-muted-foreground">
+            {spec.codeHeader} · {spec.descriptionHeader}
+          </div>
+          <div className="text-sm font-semibold">
+            {row.key === BLANK_KEY
+              ? BLANK_LABEL
+              : `${row.code || "—"} · ${row.description || ""}`}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {row.invoiceCount} invoices · {row.lineCount} lines · Incl {fmt(row.includingTax)}
+          </div>
+        </div>
+        <button type="button" className="app-btn" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1100px] text-left text-sm">
+          <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
+            <tr>
+              <Th>Date</Th>
+              <Th>PI No.</Th>
+              <Th>Supplier</Th>
+              <Th>GL Account</Th>
+              <Th>Item Description</Th>
+              <Th className="text-right">Qty</Th>
+              <Th className="text-right">Before Tax</Th>
+              <Th className="text-right">Tax</Th>
+              <Th className="text-right">Including Tax</Th>
+              <Th>Ref No.</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l) => (
+              <tr key={`${l.invoiceId}:${l.pos}`} className="border-t border-border/60">
+                <Td>{isoToMy(l.docDate)}</Td>
+                <Td>{l.docCode}</Td>
+                <Td>
+                  <div className="tabular text-[12px] text-muted-foreground">
+                    {l.supplierCode}
+                  </div>
+                  <div>{l.supplierName}</div>
+                </Td>
+                <Td>
+                  <div className="tabular text-[12px] text-muted-foreground">
+                    {l.glAccountCode}
+                  </div>
+                  <div>{l.glAccountName}</div>
+                </Td>
+                <Td className="max-w-[280px] truncate">
+                  {l.itemDescription}
+                </Td>
+                <Td className="tabular text-right">{fmt(l.qty)}</Td>
+                <Td className="tabular text-right">{fmt(l.beforeTax)}</Td>
+                <Td className="tabular text-right">{fmt(l.taxAmount)}</Td>
+                <Td className="tabular text-right">{fmt(l.includingTax)}</Td>
+                <Td>{l.referenceNo}</Td>
+              </tr>
+            ))}
+            {lines.length === 0 && (
+              <tr>
+                <Td colSpan={10} className="text-center text-muted-foreground">
+                  No contributing lines.
+                </Td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
