@@ -181,10 +181,71 @@ function PurchaseReportPage() {
   const queryClient = useQueryClient();
 
   const inquiry = useMemo(() => (hydrated ? loadInquiry() : null), [hydrated]);
-  const cached = useMemo<ReportData | undefined>(() => {
-    if (!inquiry) return undefined;
-    return queryClient.getQueryData<ReportData>(reportCacheKey(inquiry.filter));
-  }, [queryClient, inquiry]);
+
+  // Correction A Task 2: rehydrate the completed inquiry into the shared
+  // React Query cache on mount, so a refresh or direct-open of this route
+  // sees the previous inquiry even after GL Analysis unmounted and its
+  // default gcTime elapsed.
+  useEffect(() => {
+    if (!hydrated) return;
+    const snap = loadReportSnapshot();
+    if (snap) {
+      queryClient.setQueryData(reportCacheKey(snap.filter), snap.report);
+    }
+  }, [hydrated, queryClient]);
+
+  // Observer keeps the cache entry alive as long as this page is mounted.
+  const cachedQ = useQuery<ReportData | null>({
+    queryKey: inquiry ? reportCacheKey(inquiry.filter) : ["report", "gl-analysis", "none"],
+    queryFn: () => Promise.resolve(null as unknown as ReportData),
+    enabled: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
+  // Correction A Task 4: tariff master (client-side hydration) so lines
+  // captured before Detail hydration still show Tariff Code + Description.
+  const tariffQ = useQuery({
+    queryKey: ["n3", "tariffCodes"],
+    enabled: hydrated && !!token,
+    queryFn: ({ signal }) =>
+      n3ListAll<{ id: number; code?: string; description?: string }>(
+        "api/TariffCodes/Query",
+        { pageSize: 500, signal },
+      ),
+    staleTime: 5 * 60_000,
+    retry: (c) => c < 1,
+  });
+  const tariffMap = useMemo(() => {
+    const m = new Map<number, { code: string; description: string }>();
+    for (const r of tariffQ.data ?? []) {
+      m.set(r.id, { code: r.code ?? "", description: r.description ?? "" });
+    }
+    return m;
+  }, [tariffQ.data]);
+
+  const rawCached = cachedQ.data ?? null;
+  const cached = useMemo<ReportData | null>(() => {
+    if (!rawCached) return null;
+    if (tariffMap.size === 0) return rawCached;
+    // Enrich only lines missing Tariff Code / Description but carrying an ID.
+    let mutated = false;
+    const lines = rawCached.lines.map((l) => {
+      if (l.tariffCodeId != null && (!l.tariffCode || !l.tariffDescription)) {
+        const hit = tariffMap.get(l.tariffCodeId);
+        if (hit) {
+          mutated = true;
+          return {
+            ...l,
+            tariffCode: l.tariffCode || hit.code,
+            tariffDescription: l.tariffDescription || hit.description,
+          };
+        }
+      }
+      return l;
+    });
+    return mutated ? { ...rawCached, lines } : rawCached;
+  }, [rawCached, tariffMap]);
 
   const piDocCodes = useMemo(() => {
     if (!cached) return [] as string[];
