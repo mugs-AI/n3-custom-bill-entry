@@ -338,6 +338,7 @@ function PurchaseReportPage() {
                 error={auditQ.error ?? null}
                 data={auditQ.data ?? null}
                 result={auditResult}
+                docCodeToInvoiceId={docCodeToInvoiceId}
                 onRetry={() => auditQ.refetch()}
               />
             )}
