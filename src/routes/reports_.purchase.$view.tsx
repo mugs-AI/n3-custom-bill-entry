@@ -967,3 +967,35 @@ function Td({
     </td>
   );
 }
+
+// PI Number link. When we know the immutable N3 invoice id, render a link
+// into /purchase-invoices/{id}/edit. Otherwise show the number as plain
+// text with a tooltip so the operator understands why it isn't clickable.
+function PILink({ invoiceId, docCode }: { invoiceId: string; docCode: string }) {
+  if (!invoiceId) {
+    return (
+      <span title="Edit link unavailable (no N3 invoice id in the current inquiry)">
+        {docCode}
+      </span>
+    );
+  }
+  return (
+    <Link
+      to="/purchase-invoices/$id/edit"
+      params={{ id: invoiceId }}
+      className="text-primary underline-offset-2 hover:underline"
+    >
+      {docCode}
+    </Link>
+  );
+}
+
+function BalanceStatusBox({ status }: { status: import("@/lib/audit-trail").BalanceStatus }) {
+  const { label, tone } =
+    status === "balanced"
+      ? { label: "Yes", tone: "ok" as const }
+      : status === "unbalanced"
+        ? { label: "No", tone: "bad" as const }
+        : { label: "Not evaluated", tone: undefined };
+  return <TotalBox label="Balanced" value={label} tone={tone} />;
+}
