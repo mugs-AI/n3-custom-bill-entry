@@ -124,28 +124,28 @@ describe("mapInvoiceToLines", () => {
         description: "Line 1",
         qty: 2,
         unitPrice: 50,
-        netAmount: 100,
+        // Observed N3 semantics: subAmount = before tax, netAmount = including tax.
+        subAmount: 100,
         taxAmount: 5,
-        subAmount: 105,
+        netAmount: 105,
       },
     ],
   });
 
-  it("PT-5% exclusive stored line yields 100 / 5 / 105", () => {
+  it("PT-5% stored line yields 100 / 5 / 105", () => {
     const [row] = mapInvoiceToLines(baseInv());
     expect(row.beforeTax).toBe(100);
     expect(row.taxAmount).toBe(5);
     expect(row.includingTax).toBe(105);
   });
 
-  it("tax-inclusive stored line uses persisted subAmount without adding tax twice", () => {
+  it("tax-inclusive stored line uses persisted N3 amounts as-is", () => {
     const inv = baseInv();
     inv.details![0] = {
       ...inv.details![0],
-      // N3 already split gross into net+tax; subAmount is the gross.
-      netAmount: 95.24,
+      subAmount: 95.24,
       taxAmount: 4.76,
-      subAmount: 100,
+      netAmount: 100,
     };
     const [row] = mapInvoiceToLines(inv);
     expect(row.beforeTax).toBe(95.24);
@@ -174,12 +174,9 @@ describe("mapInvoiceToLines", () => {
     expect(mapInvoiceToLines(inv)).toHaveLength(1);
   });
 
-
-
-  // Anti-swap guardrail (Phase 3B Prerequisite Task 1). Locks the mapping so
-  // beforeTax always comes from netAmount and includingTax from subAmount,
-  // never the reverse.
-  it("field mapping: beforeTax<-netAmount, taxAmount<-taxAmount, includingTax<-subAmount", () => {
+  // Exact field mapping guardrail (Phase 3B Prerequisite Correction A).
+  // beforeTax MUST come from subAmount, includingTax MUST come from netAmount.
+  it("field mapping matches observed N3 M1B2607002Ikeyinn3 semantics", () => {
     const inv: RawN3Header = {
       id: "inv-accept",
       docCode: "M1B2607002Ikeyinn3",
@@ -187,23 +184,63 @@ describe("mapInvoiceToLines", () => {
       isCancelled: false,
       itemDetails: [
         { id: "l1", pos: 1, accountId: "gl", account: { code: "300-9000", name: "P" },
-          netAmount: 100, taxAmount: 5, subAmount: 105 },
+          subAmount: 100, taxAmount: 5, netAmount: 105 },
         { id: "l2", pos: 2, accountId: "gl", account: { code: "300-9000", name: "P" },
-          netAmount: 200, taxAmount: 20, subAmount: 220 },
+          subAmount: 200, taxAmount: 20, netAmount: 220 },
         { id: "l3", pos: 3, accountId: "gl", account: { code: "300-9000", name: "P" },
-          netAmount: 600, taxAmount: 60, subAmount: 660 },
+          subAmount: 600, taxAmount: 60, netAmount: 660 },
       ],
     };
     const rows = mapInvoiceToLines(inv);
     expect(rows.map((r) => r.beforeTax)).toEqual([100, 200, 600]);
     expect(rows.map((r) => r.taxAmount)).toEqual([5, 20, 60]);
     expect(rows.map((r) => r.includingTax)).toEqual([105, 220, 660]);
-    // Reject any swap: beforeTax total must be strictly less than includingTax.
-    const sumB = rows.reduce((a, r) => a + r.beforeTax, 0);
-    const sumI = rows.reduce((a, r) => a + r.includingTax, 0);
-    expect(sumB).toBe(900);
-    expect(sumI).toBe(985);
-    expect(sumB).toBeLessThan(sumI);
+    expect(rows.reduce((a, r) => a + r.beforeTax, 0)).toBe(900);
+    expect(rows.reduce((a, r) => a + r.taxAmount, 0)).toBe(85);
+    expect(rows.reduce((a, r) => a + r.includingTax, 0)).toBe(985);
+  });
+
+  it("zero-rated line: sub=100, tax=0, net=100", () => {
+    const inv = baseInv();
+    inv.details![0] = { ...inv.details![0], subAmount: 100, taxAmount: 0, netAmount: 100 };
+    const [row] = mapInvoiceToLines(inv);
+    expect(row.beforeTax).toBe(100);
+    expect(row.taxAmount).toBe(0);
+    expect(row.includingTax).toBe(100);
+  });
+
+  it("negative refund line preserves sign", () => {
+    const inv = baseInv();
+    inv.details![0] = { ...inv.details![0], subAmount: -100, taxAmount: -5, netAmount: -105 };
+    const [row] = mapInvoiceToLines(inv);
+    expect(row.beforeTax).toBe(-100);
+    expect(row.taxAmount).toBe(-5);
+    expect(row.includingTax).toBe(-105);
+  });
+
+  it("genuine zero taxAmount is not coerced to a fallback", () => {
+    const inv = baseInv();
+    inv.details![0] = { ...inv.details![0], subAmount: 42, taxAmount: 0, netAmount: 42 };
+    const [row] = mapInvoiceToLines(inv);
+    expect(row.taxAmount).toBe(0);
+    expect(row.beforeTax).toBe(42);
+    expect(row.includingTax).toBe(42);
+  });
+
+  it("null subAmount falls back to netAmount - taxAmount for beforeTax", () => {
+    const inv = baseInv();
+    inv.details![0] = { ...inv.details![0], subAmount: undefined, taxAmount: 5, netAmount: 105 };
+    const [row] = mapInvoiceToLines(inv);
+    expect(row.beforeTax).toBe(100);
+    expect(row.includingTax).toBe(105);
+  });
+
+  it("null netAmount falls back to subAmount + taxAmount for includingTax", () => {
+    const inv = baseInv();
+    inv.details![0] = { ...inv.details![0], subAmount: 100, taxAmount: 5, netAmount: undefined };
+    const [row] = mapInvoiceToLines(inv);
+    expect(row.beforeTax).toBe(100);
+    expect(row.includingTax).toBe(105);
   });
 });
 
