@@ -1,40 +1,55 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-// Phase 3B Prerequisite Correction A: guardrail against the probe becoming a
-// child of /reports again. When probe was nested under reports, /reports
-// rendered without an <Outlet /> and the URL changed but the page stayed on
-// GL Analysis. The trailing-underscore filename makes it a flat sibling.
+// Phase 3B routing guardrails:
+//   - The temporary PurchaseBook probe route and its API endpoint were
+//     removed after the audit-trail wiring landed. Re-introducing either
+//     under the old paths must fail this suite.
+//   - The Purchase Reports flat-sibling route must exist at
+//     src/routes/reports_.purchase.$view.tsx so it renders on its own
+//     without duplicating the GL Analysis page (reports.tsx is a leaf and
+//     never renders <Outlet />).
+//   - reports.tsx remains a leaf route (no <Outlet />) so nothing can
+//     accidentally nest under it and swallow child content again.
 
 function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), "utf8");
 }
 
-describe("/reports and /reports/purchasebook-probe routing", () => {
-  it("probe route file is a flat sibling (reports_.purchasebook-probe.tsx)", () => {
-    // File must exist under the flat-sibling filename.
-    const src = read("src/routes/reports_.purchasebook-probe.tsx");
-    expect(src).toContain('createFileRoute("/reports_/purchasebook-probe")');
-    expect(src).toContain("PurchaseBook Probe");
-    expect(src).toContain("Temporary diagnostic");
+describe("Phase 3B report routing", () => {
+  it("temporary PurchaseBook probe files are removed", () => {
+    expect(existsSync(resolve(process.cwd(), "src/routes/reports_.purchasebook-probe.tsx"))).toBe(
+      false,
+    );
+    expect(
+      existsSync(resolve(process.cwd(), "src/routes/api/reports/purchasebook-probe.ts")),
+    ).toBe(false);
   });
 
-  it("generated route tree exposes both paths as siblings, not parent/child", () => {
+  it("Purchase Reports shell route exists as a flat sibling", () => {
+    const src = read("src/routes/reports_.purchase.$view.tsx");
+    expect(src).toContain('createFileRoute("/reports_/purchase/$view")');
+    expect(src).toContain("Purchase Audit Trail");
+  });
+
+  it("route tree exposes /reports/purchase/{view} without nesting under /reports", () => {
     const tree = read("src/routeTree.gen.ts");
-    // Non-nested sibling — probe id lives under /reports_, not /reports.
-    expect(tree).toContain("'/reports_/purchasebook-probe'");
-    // Fullpath still resolves to /reports/purchasebook-probe for the URL.
-    expect(tree).toMatch(/'\/reports\/purchasebook-probe':\s*typeof ReportsPurchasebookProbeRoute/);
-    // reports.tsx must not adopt the probe as a child.
-    expect(tree).not.toMatch(/ReportsRoute.*addChildren\([^)]*Probe/);
+    expect(tree).toMatch(/'\/reports\/purchase\/\$view'/);
+    // Must NOT be added as a child of ReportsRoute.
+    expect(tree).not.toMatch(/ReportsRoute[\s\S]{0,120}addChildren\([^)]*Purchase/);
+    // Guardrail against re-introducing the probe.
+    expect(tree).not.toContain("purchasebook-probe");
   });
 
-  it("GL Analysis (reports.tsx) does not render <Outlet /> above its content", () => {
-    // Reports is a leaf route (its component owns the whole page), so any
-    // accidental nesting of the probe would remain invisible — which is the
-    // exact failure Correction A fixes. Keep the leaf semantics explicit.
+  it("GL Analysis (reports.tsx) is still a leaf route (no <Outlet />)", () => {
     const src = read("src/routes/reports.tsx");
     expect(src).not.toMatch(/<Outlet\b/);
+  });
+
+  it("reports.tsx no longer links to the removed probe route", () => {
+    const src = read("src/routes/reports.tsx");
+    expect(src).not.toContain("purchasebook-probe");
+    expect(src).not.toMatch(/PurchaseBook Probe/);
   });
 });

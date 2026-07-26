@@ -177,3 +177,50 @@
     background-color: var(--color-surface-2);
   }
 }
+
+/* ---------- Print (Phase 3B Purchase Audit Reports) ---------- */
+@media print {
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  /* Hide app chrome outside the report container. */
+  header, nav, .no-print {
+    display: none !important;
+  }
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .app-card {
+    border: 1px solid #999 !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+  }
+  .report-container * {
+    color: #000 !important;
+    background: #fff !important;
+  }
+  .report-container .bg-surface-2,
+  .report-container thead,
+  .report-container tfoot {
+    background: #eee !important;
+  }
+  .report-container .bg-primary\/5 {
+    background: #f5f5f5 !important;
+  }
+  .print\:break-inside-avoid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  table {
+    font-size: 10pt;
+  }
+  a {
+    color: #000 !important;
+    text-decoration: none !important;
+  }
+}
+

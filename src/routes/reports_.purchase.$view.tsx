@@ -1,0 +1,742 @@
+// Phase 3B Purchase Audit Reports — shared report shell for all 8 views.
+//
+// Flat-sibling route (trailing underscore on `reports_`) so it renders on
+// its own — reports.tsx is a leaf and has no <Outlet />.
+//
+// Data flow:
+//   Views 3-8 (dimensions) read from the shared GL Analysis React Query
+//   cache — zero extra N3 calls. If no cached inquiry is found the page
+//   directs the user back to /reports to run one.
+//
+//   Views 1-2 (Purchase Audit Trail + Posting Account Summary) additionally
+//   need PurchaseBook + GL data; those are fetched on demand via
+//   /api/reports/purchase-audit, cached per inquiry via useQuery, and shared
+//   between the two accounting views.
+
+import { createFileRoute, Link, useParams } from "@tanstack/react-router";
+import { useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AppShell } from "@/components/AppShell";
+import { useAuthToken, useHydrated } from "@/hooks/use-auth";
+import { getToken } from "@/lib/auth-store";
+import { getAuthScope } from "@/lib/draft-store";
+import { isoToMy } from "@/lib/date-my";
+import { round2, sumTo2dp } from "@/lib/money";
+import {
+  DIMENSION_SPECS,
+  BLANK_LABEL,
+  groupByDimension,
+  totalOf,
+  type DimensionKey,
+  type DimensionRow,
+} from "@/lib/dimensions";
+import type { ReportCriteria, ReportData } from "@/lib/report-model";
+import { reportCacheKey } from "@/lib/report-cache";
+import {
+  reconcileAudit,
+  type AuditDocument,
+  type GLRow,
+  type PostingAccountRow,
+  type PurchaseAuditResult,
+} from "@/lib/audit-trail";
+import type { PurchaseBookNormalized } from "@/lib/purchase-book";
+
+// ----- Route --------------------------------------------------------------
+
+type ViewId =
+  | "audit-trail"
+  | "posting-account"
+  | DimensionKey;
+
+const VIEW_META: Record<ViewId, { title: string; blurb: string }> = {
+  "audit-trail": {
+    title: "Purchase Audit Trail",
+    blurb:
+      "Every Purchase Invoice with its supplier creditor line and every reconciled GL posting per document.",
+  },
+  "posting-account": {
+    title: "Posting Account Summary",
+    blurb: "GL Debit and Credit totals per posting account for the current audit set.",
+  },
+  wbs: { title: "Summary of WBS", blurb: "Live totals grouped by WBS / Stock." },
+  "hq-sequence": {
+    title: "Summary of HQ Sequence",
+    blurb: "Live totals grouped by HQ Sequence (Purchase Invoice description).",
+  },
+  "cost-centre": { title: "Summary of Cost Centre", blurb: "Live totals grouped by Cost Centre / Project." },
+  "order-number": { title: "Summary of Order Number", blurb: "Live totals grouped by Order No. / Tariff Code." },
+  "payment-type": { title: "Summary of Payment Type", blurb: "Live totals grouped by Payment Type / Purchaser." },
+  "hq-tax": { title: "Summary of HQ Tax", blurb: "Live totals grouped by HQ Tax / Input Tax Code." },
+};
+
+const VIEW_IDS: ViewId[] = [
+  "audit-trail",
+  "posting-account",
+  "wbs",
+  "hq-sequence",
+  "cost-centre",
+  "order-number",
+  "payment-type",
+  "hq-tax",
+];
+
+export const Route = createFileRoute("/reports_/purchase/$view")({
+  head: ({ params }) => {
+    const meta = VIEW_META[(params.view as ViewId) ?? "audit-trail"] ?? VIEW_META["audit-trail"];
+    return {
+      meta: [
+        { title: `${meta.title} · Custom Bill Entry` },
+        { name: "description", content: meta.blurb },
+        { property: "og:title", content: `${meta.title} · Custom Bill Entry` },
+        { property: "og:description", content: meta.blurb },
+      ],
+    };
+  },
+  component: PurchaseReportPage,
+});
+
+// ----- Format helpers -----------------------------------------------------
+
+const MYR = new Intl.NumberFormat("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmt(n: number): string {
+  return MYR.format(Number.isFinite(n) ? n : 0);
+}
+
+// ----- Inquiry restoration ------------------------------------------------
+
+function loadInquiry(): { filter: ReportCriteria; ran: boolean } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const scope = getAuthScope();
+    const raw = window.sessionStorage.getItem(
+      `custom-bill-entry:gl-analysis-inquiry:${scope.tenantId}:${scope.userId}`,
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { filter?: ReportCriteria; ran?: boolean };
+    if (!parsed?.filter?.dateFrom || !parsed.filter.dateTo) return null;
+    return { filter: parsed.filter, ran: !!parsed.ran };
+  } catch {
+    return null;
+  }
+}
+
+// ----- Purchase Audit fetch (Views 1-2) -----------------------------------
+
+interface AuditFetchReply {
+  ok: boolean;
+  kind?: string;
+  error?: string;
+  pb?: PurchaseBookNormalized;
+  gl?: GLRow[];
+  meta?: {
+    accountCodesTried: string[];
+    accountsWithNoRows: string[];
+    pbDetailItems: number;
+    pbPostingSummary: number;
+    glRowsFetched: number;
+  };
+}
+
+async function fetchAudit(filter: ReportCriteria, piDocCodes: string[]): Promise<AuditFetchReply> {
+  const token = getToken();
+  if (!token) throw new Error("Not signed in to N3.");
+  const res = await fetch("/api/reports/purchase-audit", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      dateFrom: filter.dateFrom,
+      dateTo: filter.dateTo,
+      piDocCodes,
+    }),
+  });
+  const text = await res.text();
+  let body: AuditFetchReply | null = null;
+  try {
+    body = text ? (JSON.parse(text) as AuditFetchReply) : null;
+  } catch {
+    body = null;
+  }
+  if (!res.ok || !body?.ok) {
+    const err = new Error(body?.error || `Purchase Audit failed (${res.status})`);
+    throw err;
+  }
+  return body;
+}
+
+// ----- Component ---------------------------------------------------------
+
+function PurchaseReportPage() {
+  const params = useParams({ from: "/reports_/purchase/$view" });
+  const viewId = (VIEW_IDS.includes(params.view as ViewId) ? (params.view as ViewId) : "audit-trail") as ViewId;
+  const meta = VIEW_META[viewId];
+  const hydrated = useHydrated();
+  const token = useAuthToken();
+  const queryClient = useQueryClient();
+
+  const inquiry = useMemo(() => (hydrated ? loadInquiry() : null), [hydrated]);
+  const cached = useMemo<ReportData | undefined>(() => {
+    if (!inquiry) return undefined;
+    return queryClient.getQueryData<ReportData>(reportCacheKey(inquiry.filter));
+  }, [queryClient, inquiry]);
+
+  const piDocCodes = useMemo(() => {
+    if (!cached) return [] as string[];
+    return [...new Set(cached.lines.map((l) => l.invoiceId ? l.docCode : "").filter(Boolean))];
+  }, [cached]);
+
+  const isAccountingView = viewId === "audit-trail" || viewId === "posting-account";
+
+  const auditQ = useQuery<AuditFetchReply, Error>({
+    queryKey: ["purchase-audit", inquiry?.filter, piDocCodes],
+    enabled: hydrated && !!token && !!cached && isAccountingView && piDocCodes.length > 0,
+    queryFn: () => fetchAudit(inquiry!.filter, piDocCodes),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+
+  const auditResult: PurchaseAuditResult | null = useMemo(() => {
+    const data = auditQ.data;
+    if (!data?.ok || !data.pb || !data.gl) return null;
+    return reconcileAudit(data.pb.detailItems, data.pb.postingSummary, data.gl, piDocCodes);
+  }, [auditQ.data, piDocCodes]);
+
+  // Header
+  return (
+    <AppShell>
+      <div className="space-y-4 report-container">
+        <div className="no-print flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">{meta.title}</h1>
+            <p className="text-sm text-muted-foreground">{meta.blurb}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link to="/reports" className="app-btn">
+              ← Back to GL Analysis
+            </Link>
+            {cached && (
+              <button
+                type="button"
+                className="app-btn app-btn-primary"
+                onClick={() => window.print()}
+              >
+                Print
+              </button>
+            )}
+          </div>
+        </div>
+
+        <ReportNav current={viewId} />
+
+        {!hydrated || !token ? (
+          <div className="app-card p-6 text-sm text-muted-foreground">
+            Sign in to N3 to view Purchase Reports.
+          </div>
+        ) : !inquiry || !inquiry.ran || !cached ? (
+          <div className="app-card p-6 text-sm">
+            <p className="text-muted-foreground">
+              No GL Analysis inquiry is currently loaded. Run an inquiry first, then return
+              to this report.
+            </p>
+            <div className="mt-3">
+              <Link to="/reports" className="app-btn app-btn-primary">
+                Go to GL Analysis
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <>
+            <InquiryStamp filter={inquiry.filter} report={cached} />
+            {viewId === "audit-trail" && (
+              <AuditTrailView
+                loading={auditQ.isPending && auditQ.fetchStatus !== "idle"}
+                error={auditQ.error ?? null}
+                data={auditQ.data ?? null}
+                result={auditResult}
+                onRetry={() => auditQ.refetch()}
+              />
+            )}
+            {viewId === "posting-account" && (
+              <PostingAccountView
+                loading={auditQ.isPending && auditQ.fetchStatus !== "idle"}
+                error={auditQ.error ?? null}
+                data={auditQ.data ?? null}
+                result={auditResult}
+                onRetry={() => auditQ.refetch()}
+              />
+            )}
+            {!isAccountingView && <DimensionView view={viewId} report={cached} />}
+          </>
+        )}
+      </div>
+    </AppShell>
+  );
+}
+
+// ----- Report navigation --------------------------------------------------
+
+function ReportNav({ current }: { current: ViewId }) {
+  return (
+    <div className="no-print flex flex-wrap gap-1.5 rounded-md border border-border bg-surface-2 p-1.5 text-[12px]">
+      {VIEW_IDS.map((id) => (
+        <Link
+          key={id}
+          to="/reports/purchase/$view"
+          params={{ view: id }}
+          className={`rounded px-2 py-1 font-medium ${
+            current === id
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-surface hover:text-foreground"
+          }`}
+        >
+          {VIEW_META[id].title.replace(/^Summary of /, "")}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+function InquiryStamp({ filter, report }: { filter: ReportCriteria; report: ReportData }) {
+  return (
+    <div className="app-card p-3 text-[12px] text-muted-foreground print:border print:border-black/20">
+      <div className="grid gap-1 md:grid-cols-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase">Period</div>
+          <div className="text-foreground">
+            {isoToMy(filter.dateFrom)} → {isoToMy(filter.dateTo)}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-semibold uppercase">Coverage</div>
+          <div className="text-foreground">
+            {report.fetchedInvoiceCount} Purchase Invoice{report.fetchedInvoiceCount === 1 ? "" : "s"} ·{" "}
+            {report.summary.lineCount} line{report.summary.lineCount === 1 ? "" : "s"}
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] font-semibold uppercase">GL Analysis totals (MYR)</div>
+          <div className="tabular text-foreground">
+            Before {fmt(report.summary.beforeTax)} · Tax {fmt(report.summary.taxAmount)} · Incl {fmt(report.summary.includingTax)}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ----- Dimension views (3-8) ----------------------------------------------
+
+function DimensionView({ view, report }: { view: DimensionKey; report: ReportData }) {
+  const spec = DIMENSION_SPECS[view];
+  const rows = useMemo(() => groupByDimension(report.lines, view), [report.lines, view]);
+  const totals = useMemo(() => totalOf(rows), [rows]);
+  const glTotals = report.summary;
+  const reconciles =
+    round2(Math.abs(totals.beforeTax - glTotals.beforeTax)) < 0.011 &&
+    round2(Math.abs(totals.taxAmount - glTotals.taxAmount)) < 0.011 &&
+    round2(Math.abs(totals.includingTax - glTotals.includingTax)) < 0.011;
+
+  return (
+    <div className="app-card overflow-x-auto p-3">
+      <div className="mb-2 text-[11px] text-muted-foreground">
+        Source: {spec.source}. {rows.length} row{rows.length === 1 ? "" : "s"}.
+      </div>
+      <table className="w-full min-w-[800px] text-left text-sm">
+        <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
+          <tr>
+            <Th>{spec.codeHeader}</Th>
+            <Th>{spec.descriptionHeader}</Th>
+            <Th className="text-right">Invoices</Th>
+            <Th className="text-right">Lines</Th>
+            <Th className="text-right">Before Tax</Th>
+            <Th className="text-right">Tax</Th>
+            <Th className="text-right">Including Tax</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <Td colSpan={7} className="text-center text-muted-foreground">
+                No data.
+              </Td>
+            </tr>
+          ) : (
+            rows.map((r) => <DimensionRowView key={r.key} row={r} />)
+          )}
+        </tbody>
+        <tfoot className="bg-surface-2 text-[12px]">
+          <tr>
+            <Td colSpan={4} className="text-right font-semibold">
+              Total
+            </Td>
+            <Td className="tabular text-right font-semibold">{fmt(totals.beforeTax)}</Td>
+            <Td className="tabular text-right font-semibold">{fmt(totals.taxAmount)}</Td>
+            <Td className="tabular text-right font-semibold">{fmt(totals.includingTax)}</Td>
+          </tr>
+        </tfoot>
+      </table>
+      <div
+        className={`mt-2 text-[11px] ${reconciles ? "text-success" : "text-destructive"}`}
+      >
+        {reconciles
+          ? "Reconciles with GL Analysis totals."
+          : "Does not reconcile with GL Analysis totals — please re-run the inquiry."}
+      </div>
+    </div>
+  );
+}
+
+function DimensionRowView({ row }: { row: DimensionRow }) {
+  return (
+    <tr className="border-t border-border/60">
+      <Td className="font-medium">{row.code || (row.description === BLANK_LABEL ? "" : row.code)}</Td>
+      <Td>{row.description || (!row.code ? BLANK_LABEL : "")}</Td>
+      <Td className="tabular text-right">{row.invoiceCount}</Td>
+      <Td className="tabular text-right">{row.lineCount}</Td>
+      <Td className="tabular text-right">{fmt(row.beforeTax)}</Td>
+      <Td className="tabular text-right">{fmt(row.taxAmount)}</Td>
+      <Td className="tabular text-right">{fmt(row.includingTax)}</Td>
+    </tr>
+  );
+}
+
+// ----- View 1: Purchase Audit Trail ---------------------------------------
+
+function AuditTrailView({
+  loading,
+  error,
+  data,
+  result,
+  onRetry,
+}: {
+  loading: boolean;
+  error: Error | null;
+  data: AuditFetchReply | null;
+  result: PurchaseAuditResult | null;
+  onRetry: () => void;
+}) {
+  if (loading)
+    return (
+      <div className="app-card p-6 text-sm text-muted-foreground">
+        <div>Fetching PurchaseBook…</div>
+        <div>Fetching General Ledger transactions per posting account…</div>
+        <div>Reconciling…</div>
+      </div>
+    );
+  if (error)
+    return (
+      <ErrorCard
+        title="Incomplete Purchase Audit Trail"
+        message={error.message}
+        onRetry={onRetry}
+      />
+    );
+  if (!data || !result) return null;
+  return (
+    <div className="space-y-3">
+      <AuditReconcileHeader result={result} data={data} />
+      {result.documents.length === 0 ? (
+        <div className="app-card p-6 text-sm text-muted-foreground">
+          No documents in the audit set.
+        </div>
+      ) : (
+        result.documents.map((doc) => <AuditDocumentCard key={doc.docCode} doc={doc} />)
+      )}
+      <div className="app-card p-3">
+        <div className="grid gap-2 md:grid-cols-3">
+          <TotalBox label="Grand Debit (MYR)" value={fmt(result.grandDebit)} />
+          <TotalBox label="Grand Credit (MYR)" value={fmt(result.grandCredit)} />
+          <TotalBox
+            label="Balanced"
+            value={result.balanced ? "Yes" : "No"}
+            tone={result.balanced ? "ok" : "bad"}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuditDocumentCard({ doc }: { doc: AuditDocument }) {
+  return (
+    <div
+      className={`app-card overflow-hidden print:break-inside-avoid ${
+        doc.incomplete ? "border-l-4 border-l-destructive" : "border-l-4 border-l-success"
+      }`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border bg-surface-2 px-3 py-2">
+        <div>
+          <div className="text-sm font-semibold">
+            {doc.docCode} · {doc.supplierCode || "—"} {doc.supplierName || ""}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {isoToMy(doc.docDate)} · Term {doc.termDescription || "—"}
+            {doc.dueDate ? ` · Due ${isoToMy(doc.dueDate)}` : ""}
+          </div>
+        </div>
+        <div className="text-[11px]">
+          <span className="tabular font-semibold">
+            Dr {fmt(doc.debit)} · Cr {fmt(doc.credit)}
+          </span>{" "}
+          {doc.balanced ? (
+            <span className="text-success">balanced</span>
+          ) : (
+            <span className="text-destructive">unbalanced</span>
+          )}
+        </div>
+      </div>
+      {doc.incomplete && doc.incompleteReason && (
+        <div className="bg-destructive/10 px-3 py-1.5 text-[11px] text-destructive">
+          {doc.incompleteReason}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-left text-sm">
+          <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
+            <tr>
+              <Th>Account</Th>
+              <Th>Description</Th>
+              <Th className="text-right">Debit</Th>
+              <Th className="text-right">Credit</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {doc.creditor && (
+              <tr className="border-t border-border/60 bg-primary/5">
+                <Td className="font-medium">
+                  {doc.creditor.accountCode}{" "}
+                  <span className="text-[10px] uppercase text-muted-foreground">creditor</span>
+                </Td>
+                <Td>{doc.creditor.accountName}</Td>
+                <Td className="tabular text-right">{fmt(doc.creditor.debit)}</Td>
+                <Td className="tabular text-right">{fmt(doc.creditor.credit)}</Td>
+              </tr>
+            )}
+            {doc.postings.map((p, i) => (
+              <tr key={`${p.accountCode}:${i}`} className="border-t border-border/60">
+                <Td>{p.accountCode}</Td>
+                <Td>{p.accountName}</Td>
+                <Td className="tabular text-right">{fmt(p.debit)}</Td>
+                <Td className="tabular text-right">{fmt(p.credit)}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function AuditReconcileHeader({
+  result,
+  data,
+}: {
+  result: PurchaseAuditResult;
+  data: AuditFetchReply;
+}) {
+  return (
+    <div className="app-card p-3 text-[12px]">
+      <div className="grid gap-2 md:grid-cols-4">
+        <MiniStat label="PB detail items" value={String(data.meta?.pbDetailItems ?? 0)} />
+        <MiniStat label="PB posting rows" value={String(data.meta?.pbPostingSummary ?? 0)} />
+        <MiniStat label="GL rows in audit set" value={String(result.glRowsUsed)} />
+        <MiniStat label="Documents reconciled" value={String(result.documents.length)} />
+      </div>
+      <div className="mt-2">
+        {result.summaryCheck.kind === "matched" && (
+          <span className="text-success">
+            PB posting summary reconciles (convention: {result.summaryCheck.convention}).
+          </span>
+        )}
+        {result.summaryCheck.kind === "skipped" && (
+          <span className="text-muted-foreground">{result.summaryCheck.reason}</span>
+        )}
+        {result.summaryCheck.kind === "mismatch" && (
+          <span className="text-destructive">
+            PB posting summary does NOT reconcile with GL
+            {result.summaryCheck.accounts.length > 0
+              ? ` (accounts: ${result.summaryCheck.accounts.join(", ")})`
+              : ""}
+            .
+          </span>
+        )}
+      </div>
+      {result.incompleteReasons.length > 0 && (
+        <ul className="mt-2 list-disc pl-5 text-destructive">
+          {result.incompleteReasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// ----- View 2: Posting Account Summary ------------------------------------
+
+function PostingAccountView({
+  loading,
+  error,
+  data,
+  result,
+  onRetry,
+}: {
+  loading: boolean;
+  error: Error | null;
+  data: AuditFetchReply | null;
+  result: PurchaseAuditResult | null;
+  onRetry: () => void;
+}) {
+  if (loading)
+    return (
+      <div className="app-card p-6 text-sm text-muted-foreground">
+        Loading Posting Account totals…
+      </div>
+    );
+  if (error)
+    return (
+      <ErrorCard
+        title="Incomplete Posting Account Summary"
+        message={error.message}
+        onRetry={onRetry}
+      />
+    );
+  if (!data || !result) return null;
+  return (
+    <div className="space-y-3">
+      <AuditReconcileHeader result={result} data={data} />
+      <div className="app-card overflow-x-auto p-3">
+        <table className="w-full min-w-[600px] text-left text-sm">
+          <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
+            <tr>
+              <Th>Account Code</Th>
+              <Th>Account Name</Th>
+              <Th className="text-right">Debit (MYR)</Th>
+              <Th className="text-right">Credit (MYR)</Th>
+              <Th className="text-right">Net (Dr - Cr)</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.postingAccounts.length === 0 ? (
+              <tr>
+                <Td colSpan={5} className="text-center text-muted-foreground">
+                  No posting rows.
+                </Td>
+              </tr>
+            ) : (
+              result.postingAccounts.map((r: PostingAccountRow) => (
+                <tr key={r.accountCode} className="border-t border-border/60">
+                  <Td className="font-medium">{r.accountCode}</Td>
+                  <Td>{r.accountName}</Td>
+                  <Td className="tabular text-right">{fmt(r.debit)}</Td>
+                  <Td className="tabular text-right">{fmt(r.credit)}</Td>
+                  <Td className="tabular text-right">{fmt(round2(r.debit - r.credit))}</Td>
+                </tr>
+              ))
+            )}
+          </tbody>
+          <tfoot className="bg-surface-2 text-[12px]">
+            <tr>
+              <Td colSpan={2} className="text-right font-semibold">
+                Total
+              </Td>
+              <Td className="tabular text-right font-semibold">
+                {fmt(sumTo2dp(result.postingAccounts.map((r) => r.debit)))}
+              </Td>
+              <Td className="tabular text-right font-semibold">
+                {fmt(sumTo2dp(result.postingAccounts.map((r) => r.credit)))}
+              </Td>
+              <Td className="tabular text-right font-semibold">
+                {fmt(round2(result.grandDebit - result.grandCredit))}
+              </Td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ----- Little widgets -----------------------------------------------------
+
+function TotalBox({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "ok" | "bad";
+}) {
+  return (
+    <div className="app-card p-3">
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</div>
+      <div
+        className={`tabular text-lg font-semibold ${
+          tone === "ok" ? "text-success" : tone === "bad" ? "text-destructive" : ""
+        }`}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</div>
+      <div className="tabular font-semibold">{value}</div>
+    </div>
+  );
+}
+
+function ErrorCard({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string;
+  message: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+      <div>
+        <strong>{title}:</strong> {message}
+      </div>
+      <button type="button" className="app-btn mt-2" onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  );
+}
+
+function Th({
+  children,
+  className,
+}: {
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  return <th className={`px-3 py-2 font-semibold ${className ?? ""}`}>{children}</th>;
+}
+
+function Td({
+  children,
+  className,
+  colSpan,
+}: {
+  children?: React.ReactNode;
+  className?: string;
+  colSpan?: number;
+}) {
+  return (
+    <td colSpan={colSpan} className={`px-3 py-2 align-top ${className ?? ""}`}>
+      {children}
+    </td>
+  );
+}
