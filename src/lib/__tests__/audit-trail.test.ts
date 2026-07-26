@@ -104,4 +104,43 @@ describe("Purchase Audit Trail reconciliation", () => {
     expect(r.documents[0].balanced).toBe(false);
     expect(r.documents[0].incomplete).toBe(true);
   });
+
+  it("case-insensitively joins PB, PI and GL doc codes (Phase 3B Correction B)", () => {
+    // PB, PI and GL each use a different casing / whitespace shape for the
+    // same document. Canonical joins must fold all three onto one audit doc.
+    const pb: PurchaseBookDetailItem[] = [
+      { docCode: "pi-a", supplierCode: "s100", supplierName: "Acme" },
+    ];
+    const gl: GLRow[] = [
+      { docCode: " PI-A ", accountCode: "S100", debitLocal: 0, creditLocal: 105 },
+      { docCode: "pi-a", accountCode: "6110", debitLocal: 100, creditLocal: 0 },
+      { docCode: "PI-A", accountCode: "5210", debitLocal: 5, creditLocal: 0 },
+    ];
+    const r = reconcileAudit(pb, [], gl, ["PI-A"]);
+    expect(r.auditDocCodes).toEqual(["PI-A"]);
+    expect(r.documents).toHaveLength(1);
+    expect(r.documents[0].balanced).toBe(true);
+    expect(r.documents[0].creditor?.accountCode).toBe("S100");
+    expect(r.glRowsUsed).toBe(3);
+    expect(r.balanceStatus).toBe("balanced");
+  });
+
+  it("returns balanceStatus 'not-evaluated' when the audit intersection is empty", () => {
+    // PB and PI have zero overlap → nothing to evaluate. The UI must NOT
+    // show "Balanced: Yes" in this state.
+    const r = reconcileAudit(PB_DETAILS, PB_SUMMARY, GL_ROWS, ["PI-ZZZ"]);
+    expect(r.auditDocCodes).toEqual([]);
+    expect(r.balanceStatus).toBe("not-evaluated");
+    expect(r.balanced).toBe(false);
+    expect(r.isComplete).toBe(false);
+    expect(r.summaryCheck.kind).toBe("skipped");
+  });
+
+  it("returns balanceStatus 'not-evaluated' when GL has no rows for the intersection", () => {
+    const r = reconcileAudit(PB_DETAILS, PB_SUMMARY, [], ["PI-A", "PI-B"]);
+    expect(r.auditDocCodes).toEqual(["PI-A", "PI-B"]);
+    expect(r.glRowsUsed).toBe(0);
+    expect(r.balanceStatus).toBe("not-evaluated");
+    expect(r.balanced).toBe(false);
+  });
 });

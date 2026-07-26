@@ -43,6 +43,7 @@ import {
   type PurchaseAuditResult,
 } from "@/lib/audit-trail";
 import type { PurchaseBookNormalized } from "@/lib/purchase-book";
+import { canonicalDocCode } from "@/lib/report-keys";
 
 // ----- Route --------------------------------------------------------------
 
@@ -137,6 +138,8 @@ interface AuditFetchReply {
     pbDetailItems: number;
     pbPostingSummary: number;
     glRowsFetched: number;
+    piDocSample?: string[];
+    pbDocSample?: string[];
   };
 }
 
@@ -252,6 +255,21 @@ function PurchaseReportPage() {
     return [...new Set(cached.lines.map((l) => l.invoiceId ? l.docCode : "").filter(Boolean))];
   }, [cached]);
 
+  // Canonical doc-code -> immutable N3 invoice id, built once from the
+  // current GL Analysis report. Task 5: Audit Trail PI numbers use this map
+  // to link into /purchase-invoices/{invoiceId}/edit without an extra fetch.
+  const docCodeToInvoiceId = useMemo(() => {
+    const m = new Map<string, string>();
+    if (!cached) return m;
+    for (const l of cached.lines) {
+      if (!l.invoiceId) continue;
+      const key = canonicalDocCode(l.docCode);
+      if (key && !m.has(key)) m.set(key, l.invoiceId);
+    }
+    return m;
+  }, [cached]);
+
+
   const isAccountingView = viewId === "audit-trail" || viewId === "posting-account";
 
   const auditQ = useQuery<AuditFetchReply, Error>({
@@ -320,6 +338,7 @@ function PurchaseReportPage() {
                 error={auditQ.error ?? null}
                 data={auditQ.data ?? null}
                 result={auditResult}
+                docCodeToInvoiceId={docCodeToInvoiceId}
                 onRetry={() => auditQ.refetch()}
               />
             )}
@@ -570,7 +589,7 @@ function DimensionDrillPanel({
             {lines.map((l) => (
               <tr key={`${l.invoiceId}:${l.pos}`} className="border-t border-border/60">
                 <Td>{isoToMy(l.docDate)}</Td>
-                <Td>{l.docCode}</Td>
+                <Td><PILink invoiceId={l.invoiceId} docCode={l.docCode} /></Td>
                 <Td>
                   <div className="tabular text-[12px] text-muted-foreground">
                     {l.supplierCode}
@@ -614,12 +633,14 @@ function AuditTrailView({
   error,
   data,
   result,
+  docCodeToInvoiceId,
   onRetry,
 }: {
   loading: boolean;
   error: Error | null;
   data: AuditFetchReply | null;
   result: PurchaseAuditResult | null;
+  docCodeToInvoiceId: Map<string, string>;
   onRetry: () => void;
 }) {
   if (loading)
@@ -647,24 +668,26 @@ function AuditTrailView({
           No documents in the audit set.
         </div>
       ) : (
-        result.documents.map((doc) => <AuditDocumentCard key={doc.docCode} doc={doc} />)
+        result.documents.map((doc) => (
+          <AuditDocumentCard
+            key={doc.docCode}
+            doc={doc}
+            invoiceId={docCodeToInvoiceId.get(canonicalDocCode(doc.docCode)) ?? ""}
+          />
+        ))
       )}
       <div className="app-card p-3">
         <div className="grid gap-2 md:grid-cols-3">
           <TotalBox label="Grand Debit (MYR)" value={fmt(result.grandDebit)} />
           <TotalBox label="Grand Credit (MYR)" value={fmt(result.grandCredit)} />
-          <TotalBox
-            label="Balanced"
-            value={result.balanced ? "Yes" : "No"}
-            tone={result.balanced ? "ok" : "bad"}
-          />
+          <BalanceStatusBox status={result.balanceStatus} />
         </div>
       </div>
     </div>
   );
 }
 
-function AuditDocumentCard({ doc }: { doc: AuditDocument }) {
+function AuditDocumentCard({ doc, invoiceId }: { doc: AuditDocument; invoiceId: string }) {
   return (
     <div
       className={`app-card overflow-hidden print:break-inside-avoid ${
@@ -674,7 +697,7 @@ function AuditDocumentCard({ doc }: { doc: AuditDocument }) {
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border bg-surface-2 px-3 py-2">
         <div>
           <div className="text-sm font-semibold">
-            {doc.docCode} · {doc.supplierCode || "—"} {doc.supplierName || ""}
+            <PILink invoiceId={invoiceId} docCode={doc.docCode} /> · {doc.supplierCode || "—"} {doc.supplierName || ""}
           </div>
           <div className="text-[11px] text-muted-foreground">
             {isoToMy(doc.docDate)} · Term {doc.termDescription || "—"}
@@ -809,9 +832,15 @@ function PostingAccountView({
       />
     );
   if (!data || !result) return null;
+  const notEvaluated = result.balanceStatus === "not-evaluated";
   return (
     <div className="space-y-3">
       <AuditReconcileHeader result={result} data={data} />
+      {notEvaluated && (
+        <div className="app-card border-l-4 border-l-destructive p-3 text-sm">
+          Posting Account Summary was not evaluated: no intersecting documents or GL rows.
+        </div>
+      )}
       <div className="app-card overflow-x-auto p-3">
         <table className="w-full min-w-[600px] text-left text-sm">
           <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
@@ -943,4 +972,36 @@ function Td({
       {children}
     </td>
   );
+}
+
+// PI Number link. When we know the immutable N3 invoice id, render a link
+// into /purchase-invoices/{id}/edit. Otherwise show the number as plain
+// text with a tooltip so the operator understands why it isn't clickable.
+function PILink({ invoiceId, docCode }: { invoiceId: string; docCode: string }) {
+  if (!invoiceId) {
+    return (
+      <span title="Edit link unavailable (no N3 invoice id in the current inquiry)">
+        {docCode}
+      </span>
+    );
+  }
+  return (
+    <Link
+      to="/purchase-invoices/$id/edit"
+      params={{ id: invoiceId }}
+      className="text-primary underline-offset-2 hover:underline"
+    >
+      {docCode}
+    </Link>
+  );
+}
+
+function BalanceStatusBox({ status }: { status: import("@/lib/audit-trail").BalanceStatus }) {
+  const { label, tone } =
+    status === "balanced"
+      ? { label: "Yes", tone: "ok" as const }
+      : status === "unbalanced"
+        ? { label: "No", tone: "bad" as const }
+        : { label: "Not evaluated", tone: undefined };
+  return <TotalBox label="Balanced" value={label} tone={tone} />;
 }

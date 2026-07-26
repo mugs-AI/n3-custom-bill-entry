@@ -14,12 +14,17 @@
 // it with real fixtures. On any shape the parser does not recognise it MUST
 // return `{ kind: "contract-mismatch" }` — never silently downgrade to a
 // balanced-looking empty report.
+import { canonicalDocCode } from "./report-keys";
+
 
 export interface PurchaseBookDetailItem {
   docCode?: string;
   docDate?: string;
   docType?: string;
   isCancelled?: boolean;
+  /** Documented supplier/creditor code per PurchaseBookDetailReportModel.code. */
+  code?: string;
+  /** Backward-compatible fallback only. Read via purchaseBookSupplierCode(). */
   supplierCode?: string;
   supplierName?: string;
   purchaserCode?: string;
@@ -36,6 +41,21 @@ export interface PurchaseBookDetailItem {
   netAmount?: number;
   netAmountLocal?: number;
   [key: string]: unknown;
+}
+
+/**
+ * Documented supplier/creditor code accessor. Priority:
+ *   1. row.code (documented PurchaseBookDetailReportModel.code)
+ *   2. row.supplierCode (backward-compatible live-shape fallback)
+ *   3. "" (missing)
+ * Do not read either raw field directly in audit logic.
+ */
+export function purchaseBookSupplierCode(row: PurchaseBookDetailItem | undefined | null): string {
+  if (!row) return "";
+  const c = typeof row.code === "string" ? row.code.trim() : "";
+  if (c) return c;
+  const s = typeof row.supplierCode === "string" ? row.supplierCode.trim() : "";
+  return s;
 }
 
 export interface PurchaseBookPostingSummaryRow {
@@ -160,13 +180,19 @@ function concatModels(models: PurchaseBookReportModel[]): PurchaseBookNormalized
   return { kind: "ok", models: models.length, detailItems, postingSummary };
 }
 
-/** Distinct non-cancelled doc codes returned by PurchaseBook. */
+/**
+ * Distinct non-cancelled doc codes returned by PurchaseBook. Uses the shared
+ * canonical document-key rule to deduplicate case/whitespace variants, but
+ * returns the first original casing seen so callers can display the value.
+ */
 export function purchaseBookDocCodes(n: PurchaseBookNormalized): string[] {
-  const out = new Set<string>();
+  const seen = new Map<string, string>();
   for (const d of n.detailItems) {
     if (d.isCancelled) continue;
-    const c = typeof d.docCode === "string" ? d.docCode.trim() : "";
-    if (c) out.add(c);
+    const raw = typeof d.docCode === "string" ? d.docCode.trim() : "";
+    if (!raw) continue;
+    const key = canonicalDocCode(raw);
+    if (!seen.has(key)) seen.set(key, raw);
   }
-  return [...out];
+  return [...seen.values()];
 }

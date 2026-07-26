@@ -14,10 +14,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   normalizePurchaseBook,
+  purchaseBookSupplierCode,
   type PurchaseBookDetailItem,
   type PurchaseBookNormalized,
   type PurchaseBookPostingSummaryRow,
 } from "@/lib/purchase-book";
+import { canonicalAccountCode, canonicalDocCode } from "@/lib/report-keys";
 import type { GLRow } from "@/lib/audit-trail";
 
 const REPORTING_DEFAULT = "https://openapi-reporting.account.qne.cloud";
@@ -37,6 +39,9 @@ interface Reply {
     pbDetailItems: number;
     pbPostingSummary: number;
     glRowsFetched: number;
+    /** Up to three canonical PI/PB doc-code samples for authenticated diagnostics. */
+    piDocSample: string[];
+    pbDocSample: string[];
   };
 }
 
@@ -218,20 +223,27 @@ async function fetchGLForAccount(
   return { ok: true, rows };
 }
 
+/**
+ * Candidate account codes for GL fetch = every posting-summary accountCode
+ * PLUS every PurchaseBook supplier/creditor code (documented `code`, with
+ * `supplierCode` as backward-compatible fallback). Deduplicated using the
+ * shared canonical account-key rule, keeping the first original casing for
+ * the upstream query.
+ */
 function candidateAccountCodes(
   detailItems: PurchaseBookDetailItem[],
   postingSummary: PurchaseBookPostingSummaryRow[],
 ): string[] {
-  const out = new Set<string>();
-  for (const s of postingSummary) {
-    const c = (s.accountCode ?? "").trim();
-    if (c) out.add(c);
-  }
-  for (const d of detailItems) {
-    const c = (d.supplierCode ?? "").trim();
-    if (c) out.add(c);
-  }
-  return [...out].sort();
+  const seen = new Map<string, string>();
+  const add = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const key = canonicalAccountCode(trimmed);
+    if (!seen.has(key)) seen.set(key, trimmed);
+  };
+  for (const s of postingSummary) add(typeof s.accountCode === "string" ? s.accountCode : "");
+  for (const d of detailItems) add(purchaseBookSupplierCode(d));
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
 /** Simple pool: at most `limit` workers concurrent over `items`. */
@@ -297,6 +309,18 @@ async function handle(request: Request): Promise<Response> {
     else gl.push(...r.rows);
   }
 
+  const piDocSample = [
+    ...new Set(req.piDocCodes.map(canonicalDocCode).filter(Boolean)),
+  ].slice(0, 3);
+  const pbDocSample = [
+    ...new Set(
+      pb.detailItems
+        .filter((d) => !d.isCancelled)
+        .map((d) => canonicalDocCode(d.docCode))
+        .filter(Boolean),
+    ),
+  ].slice(0, 3);
+
   return jsonRes(200, {
     ok: true,
     pb,
@@ -307,6 +331,8 @@ async function handle(request: Request): Promise<Response> {
       pbDetailItems: pb.detailItems.length,
       pbPostingSummary: pb.postingSummary.length,
       glRowsFetched: gl.length,
+      piDocSample,
+      pbDocSample,
     },
   });
 }
