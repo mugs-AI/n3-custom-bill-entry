@@ -697,7 +697,7 @@ function AuditDocumentCard({ doc, invoiceId }: { doc: AuditDocument; invoiceId: 
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border bg-surface-2 px-3 py-2">
         <div>
           <div className="text-sm font-semibold">
-            {doc.docCode} · {doc.supplierCode || "—"} {doc.supplierName || ""}
+            <PILink invoiceId={invoiceId} docCode={doc.docCode} /> · {doc.supplierCode || "—"} {doc.supplierName || ""}
           </div>
           <div className="text-[11px] text-muted-foreground">
             {isoToMy(doc.docDate)} · Term {doc.termDescription || "—"}
