@@ -14,7 +14,7 @@
 //   between the two accounting views.
 
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
@@ -22,16 +22,19 @@ import { getToken } from "@/lib/auth-store";
 import { getAuthScope } from "@/lib/draft-store";
 import { isoToMy } from "@/lib/date-my";
 import { round2, sumTo2dp } from "@/lib/money";
+import { n3ListAll } from "@/lib/n3-client";
 import {
   DIMENSION_SPECS,
+  BLANK_KEY,
   BLANK_LABEL,
   groupByDimension,
+  linesForRow,
   totalOf,
   type DimensionKey,
   type DimensionRow,
 } from "@/lib/dimensions";
-import type { ReportCriteria, ReportData } from "@/lib/report-model";
-import { reportCacheKey } from "@/lib/report-cache";
+import type { GLDrillDownLine, ReportCriteria, ReportData } from "@/lib/report-model";
+import { loadReportSnapshot, reportCacheKey } from "@/lib/report-cache";
 import {
   reconcileAudit,
   type AuditDocument,
