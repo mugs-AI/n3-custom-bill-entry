@@ -220,20 +220,27 @@ async function fetchGLForAccount(
   return { ok: true, rows };
 }
 
+/**
+ * Candidate account codes for GL fetch = every posting-summary accountCode
+ * PLUS every PurchaseBook supplier/creditor code (documented `code`, with
+ * `supplierCode` as backward-compatible fallback). Deduplicated using the
+ * shared canonical account-key rule, keeping the first original casing for
+ * the upstream query.
+ */
 function candidateAccountCodes(
   detailItems: PurchaseBookDetailItem[],
   postingSummary: PurchaseBookPostingSummaryRow[],
 ): string[] {
-  const out = new Set<string>();
-  for (const s of postingSummary) {
-    const c = (s.accountCode ?? "").trim();
-    if (c) out.add(c);
-  }
-  for (const d of detailItems) {
-    const c = (d.supplierCode ?? "").trim();
-    if (c) out.add(c);
-  }
-  return [...out].sort();
+  const seen = new Map<string, string>();
+  const add = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const key = canonicalAccountCode(trimmed);
+    if (!seen.has(key)) seen.set(key, trimmed);
+  };
+  for (const s of postingSummary) add(typeof s.accountCode === "string" ? s.accountCode : "");
+  for (const d of detailItems) add(purchaseBookSupplierCode(d));
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
 /** Simple pool: at most `limit` workers concurrent over `items`. */
