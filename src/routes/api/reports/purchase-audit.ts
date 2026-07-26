@@ -14,10 +14,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   normalizePurchaseBook,
+  purchaseBookSupplierCode,
   type PurchaseBookDetailItem,
   type PurchaseBookNormalized,
   type PurchaseBookPostingSummaryRow,
 } from "@/lib/purchase-book";
+import { canonicalAccountCode, canonicalDocCode } from "@/lib/report-keys";
 import type { GLRow } from "@/lib/audit-trail";
 
 const REPORTING_DEFAULT = "https://openapi-reporting.account.qne.cloud";
