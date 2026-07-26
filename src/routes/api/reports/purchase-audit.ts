@@ -39,6 +39,9 @@ interface Reply {
     pbDetailItems: number;
     pbPostingSummary: number;
     glRowsFetched: number;
+    /** Up to three canonical PI/PB doc-code samples for authenticated diagnostics. */
+    piDocSample: string[];
+    pbDocSample: string[];
   };
 }
 
