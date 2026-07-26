@@ -61,8 +61,11 @@ export interface GLDrillDownLine {
   supplierName: string;
   supplierInvNo: string;
   hqSequence: string;
+  /** Immutable N3 Purchaser ID — Payment Type dimension groups on this. */
+  purchaserId: number | null;
   purchaserCode: string;
   purchaserName: string;
+  /** Legacy display of Term description/code. Never used for grouping. */
   paymentType: string;
   glAccountId: string | null;
   glAccountCode: string;
@@ -74,6 +77,10 @@ export interface GLDrillDownLine {
   itemDescription: string;
   taxCodeId: number | null;
   taxCodeCode: string;
+  /** Immutable N3 Tariff Code ID — Order-Number dimension groups on this. */
+  tariffCodeId: number | null;
+  tariffCode: string;
+  tariffDescription: string;
   qty: number;
   unitPrice: number;
   beforeTax: number;
@@ -301,6 +308,7 @@ export function mapInvoiceToLines(inv: PurchaseInvoice): GLDrillDownLine[] {
       supplierName,
       supplierInvNo: inv.supplierInvNo ?? "",
       hqSequence: inv.description ?? "",
+      purchaserId: inv.purchaserId ?? null,
       purchaserCode,
       purchaserName,
       paymentType,
@@ -314,6 +322,9 @@ export function mapInvoiceToLines(inv: PurchaseInvoice): GLDrillDownLine[] {
       itemDescription: d.description ?? d.stock?.name ?? "",
       taxCodeId: d.taxCodeId ?? null,
       taxCodeCode: d.taxCode?.code ?? "",
+      tariffCodeId: d.tariffCodeId ?? null,
+      tariffCode: d.tariffCode?.code ?? "",
+      tariffDescription: d.tariffCode?.description ?? "",
       qty: typeof d.qty === "number" ? d.qty : 0,
       unitPrice: typeof d.unitPrice === "number" ? d.unitPrice : 0,
       beforeTax,
