@@ -403,45 +403,68 @@ function DimensionView({ view, report }: { view: DimensionKey; report: ReportDat
     round2(Math.abs(totals.taxAmount - glTotals.taxAmount)) < 0.011 &&
     round2(Math.abs(totals.includingTax - glTotals.includingTax)) < 0.011;
 
+  // Correction A Task 5: one row can be expanded at a time; the drilled-in
+  // detail panel renders directly below the summary table and is hidden in
+  // print via the .no-print utility so hard copies stay one clean summary.
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const drillLines = useMemo(
+    () => (expandedKey ? linesForRow(report.lines, view, expandedKey) : []),
+    [expandedKey, report.lines, view],
+  );
+  const drillRow = expandedKey ? rows.find((r) => r.key === expandedKey) ?? null : null;
+
   return (
-    <div className="app-card overflow-x-auto p-3">
+    <div className="app-card p-3">
       <div className="mb-2 text-[11px] text-muted-foreground">
         Source: {spec.source}. {rows.length} row{rows.length === 1 ? "" : "s"}.
       </div>
-      <table className="w-full min-w-[800px] text-left text-sm">
-        <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
-          <tr>
-            <Th>{spec.codeHeader}</Th>
-            <Th>{spec.descriptionHeader}</Th>
-            <Th className="text-right">Invoices</Th>
-            <Th className="text-right">Lines</Th>
-            <Th className="text-right">Before Tax</Th>
-            <Th className="text-right">Tax</Th>
-            <Th className="text-right">Including Tax</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[800px] text-left text-sm">
+          <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
             <tr>
-              <Td colSpan={7} className="text-center text-muted-foreground">
-                No data.
-              </Td>
+              <Th>{spec.codeHeader}</Th>
+              <Th>{spec.descriptionHeader}</Th>
+              <Th className="text-right">Invoices</Th>
+              <Th className="text-right">Lines</Th>
+              <Th className="text-right">Before Tax</Th>
+              <Th className="text-right">Tax</Th>
+              <Th className="text-right">Including Tax</Th>
+              <Th className="no-print" />
             </tr>
-          ) : (
-            rows.map((r) => <DimensionRowView key={r.key} row={r} />)
-          )}
-        </tbody>
-        <tfoot className="bg-surface-2 text-[12px]">
-          <tr>
-            <Td colSpan={4} className="text-right font-semibold">
-              Total
-            </Td>
-            <Td className="tabular text-right font-semibold">{fmt(totals.beforeTax)}</Td>
-            <Td className="tabular text-right font-semibold">{fmt(totals.taxAmount)}</Td>
-            <Td className="tabular text-right font-semibold">{fmt(totals.includingTax)}</Td>
-          </tr>
-        </tfoot>
-      </table>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <Td colSpan={8} className="text-center text-muted-foreground">
+                  No data.
+                </Td>
+              </tr>
+            ) : (
+              rows.map((r) => (
+                <DimensionRowView
+                  key={r.key}
+                  row={r}
+                  expanded={expandedKey === r.key}
+                  onDrill={() =>
+                    setExpandedKey((cur) => (cur === r.key ? null : r.key))
+                  }
+                />
+              ))
+            )}
+          </tbody>
+          <tfoot className="bg-surface-2 text-[12px]">
+            <tr>
+              <Td colSpan={4} className="text-right font-semibold">
+                Total
+              </Td>
+              <Td className="tabular text-right font-semibold">{fmt(totals.beforeTax)}</Td>
+              <Td className="tabular text-right font-semibold">{fmt(totals.taxAmount)}</Td>
+              <Td className="tabular text-right font-semibold">{fmt(totals.includingTax)}</Td>
+              <Td className="no-print" />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
       <div
         className={`mt-2 text-[11px] ${reconciles ? "text-success" : "text-destructive"}`}
       >
@@ -449,21 +472,138 @@ function DimensionView({ view, report }: { view: DimensionKey; report: ReportDat
           ? "Reconciles with GL Analysis totals."
           : "Does not reconcile with GL Analysis totals — please re-run the inquiry."}
       </div>
+      {drillRow && (
+        <div className="no-print mt-3">
+          <DimensionDrillPanel
+            spec={{
+              codeHeader: spec.codeHeader,
+              descriptionHeader: spec.descriptionHeader,
+            }}
+            row={drillRow}
+            lines={drillLines}
+            onClose={() => setExpandedKey(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function DimensionRowView({ row }: { row: DimensionRow }) {
+function DimensionRowView({
+  row,
+  expanded,
+  onDrill,
+}: {
+  row: DimensionRow;
+  expanded: boolean;
+  onDrill: () => void;
+}) {
+  const isBlank = row.key === BLANK_KEY;
   return (
-    <tr className="border-t border-border/60">
-      <Td className="font-medium">{row.code || (row.description === BLANK_LABEL ? "" : row.code)}</Td>
-      <Td>{row.description || (!row.code ? BLANK_LABEL : "")}</Td>
+    <tr
+      className={`border-t border-border/60 ${expanded ? "bg-primary/5" : ""}`}
+    >
+      <Td className="font-medium">{isBlank ? "" : row.code}</Td>
+      <Td>{isBlank ? BLANK_LABEL : row.description}</Td>
       <Td className="tabular text-right">{row.invoiceCount}</Td>
       <Td className="tabular text-right">{row.lineCount}</Td>
       <Td className="tabular text-right">{fmt(row.beforeTax)}</Td>
       <Td className="tabular text-right">{fmt(row.taxAmount)}</Td>
       <Td className="tabular text-right">{fmt(row.includingTax)}</Td>
+      <Td className="no-print">
+        <button type="button" className="app-btn" onClick={onDrill}>
+          {expanded ? "Hide" : "Drill"}
+        </button>
+      </Td>
     </tr>
+  );
+}
+
+function DimensionDrillPanel({
+  spec,
+  row,
+  lines,
+  onClose,
+}: {
+  spec: { codeHeader: string; descriptionHeader: string };
+  row: DimensionRow;
+  lines: GLDrillDownLine[];
+  onClose: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-border bg-surface p-3">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <div>
+          <div className="text-[10px] font-semibold uppercase text-muted-foreground">
+            {spec.codeHeader} · {spec.descriptionHeader}
+          </div>
+          <div className="text-sm font-semibold">
+            {row.key === BLANK_KEY
+              ? BLANK_LABEL
+              : `${row.code || "—"} · ${row.description || ""}`}
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {row.invoiceCount} invoices · {row.lineCount} lines · Incl {fmt(row.includingTax)}
+          </div>
+        </div>
+        <button type="button" className="app-btn" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1100px] text-left text-sm">
+          <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
+            <tr>
+              <Th>Date</Th>
+              <Th>PI No.</Th>
+              <Th>Supplier</Th>
+              <Th>GL Account</Th>
+              <Th>Item Description</Th>
+              <Th className="text-right">Qty</Th>
+              <Th className="text-right">Before Tax</Th>
+              <Th className="text-right">Tax</Th>
+              <Th className="text-right">Including Tax</Th>
+              <Th>Ref No.</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l) => (
+              <tr key={`${l.invoiceId}:${l.pos}`} className="border-t border-border/60">
+                <Td>{isoToMy(l.docDate)}</Td>
+                <Td>{l.docCode}</Td>
+                <Td>
+                  <div className="tabular text-[12px] text-muted-foreground">
+                    {l.supplierCode}
+                  </div>
+                  <div>{l.supplierName}</div>
+                </Td>
+                <Td>
+                  <div className="tabular text-[12px] text-muted-foreground">
+                    {l.glAccountCode}
+                  </div>
+                  <div>{l.glAccountName}</div>
+                </Td>
+                <Td className="max-w-[280px] truncate" title={l.itemDescription}>
+                  {l.itemDescription}
+                </Td>
+                <Td className="tabular text-right">{fmt(l.qty)}</Td>
+                <Td className="tabular text-right">{fmt(l.beforeTax)}</Td>
+                <Td className="tabular text-right">{fmt(l.taxAmount)}</Td>
+                <Td className="tabular text-right">{fmt(l.includingTax)}</Td>
+                <Td>{l.referenceNo}</Td>
+              </tr>
+            ))}
+            {lines.length === 0 && (
+              <tr>
+                <Td colSpan={10} className="text-center text-muted-foreground">
+                  No contributing lines.
+                </Td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
