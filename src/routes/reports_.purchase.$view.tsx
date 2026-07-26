@@ -137,6 +137,8 @@ interface AuditFetchReply {
     pbDetailItems: number;
     pbPostingSummary: number;
     glRowsFetched: number;
+    piDocSample?: string[];
+    pbDocSample?: string[];
   };
 }
 
