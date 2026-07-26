@@ -583,7 +583,7 @@ function DimensionDrillPanel({
                   </div>
                   <div>{l.glAccountName}</div>
                 </Td>
-                <Td className="max-w-[280px] truncate" title={l.itemDescription}>
+                <Td className="max-w-[280px] truncate">
                   {l.itemDescription}
                 </Td>
                 <Td className="tabular text-right">{fmt(l.qty)}</Td>
