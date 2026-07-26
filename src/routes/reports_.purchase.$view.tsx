@@ -589,7 +589,7 @@ function DimensionDrillPanel({
             {lines.map((l) => (
               <tr key={`${l.invoiceId}:${l.pos}`} className="border-t border-border/60">
                 <Td>{isoToMy(l.docDate)}</Td>
-                <Td>{l.docCode}</Td>
+                <Td><PILink invoiceId={l.invoiceId} docCode={l.docCode} /></Td>
                 <Td>
                   <div className="tabular text-[12px] text-muted-foreground">
                     {l.supplierCode}
