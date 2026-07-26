@@ -75,9 +75,9 @@ const MAIN_INVOICE_ENVELOPE = {
         description: "Line 1",
         qty: 1,
         unitPrice: 100,
-        netAmount: 5,
-        taxAmount: 105,
         subAmount: 100,
+        taxAmount: 5,
+        netAmount: 105,
       },
       {
         id: "l2",
