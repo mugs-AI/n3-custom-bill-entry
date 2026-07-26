@@ -255,6 +255,21 @@ function PurchaseReportPage() {
     return [...new Set(cached.lines.map((l) => l.invoiceId ? l.docCode : "").filter(Boolean))];
   }, [cached]);
 
+  // Canonical doc-code -> immutable N3 invoice id, built once from the
+  // current GL Analysis report. Task 5: Audit Trail PI numbers use this map
+  // to link into /purchase-invoices/{invoiceId}/edit without an extra fetch.
+  const docCodeToInvoiceId = useMemo(() => {
+    const m = new Map<string, string>();
+    if (!cached) return m;
+    for (const l of cached.lines) {
+      if (!l.invoiceId) continue;
+      const key = canonicalDocCode(l.docCode);
+      if (key && !m.has(key)) m.set(key, l.invoiceId);
+    }
+    return m;
+  }, [cached]);
+
+
   const isAccountingView = viewId === "audit-trail" || viewId === "posting-account";
 
   const auditQ = useQuery<AuditFetchReply, Error>({
