@@ -14,6 +14,8 @@
 // it with real fixtures. On any shape the parser does not recognise it MUST
 // return `{ kind: "contract-mismatch" }` — never silently downgrade to a
 // balanced-looking empty report.
+import { canonicalDocCode } from "./report-keys";
+
 
 export interface PurchaseBookDetailItem {
   docCode?: string;
