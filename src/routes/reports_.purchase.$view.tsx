@@ -633,12 +633,14 @@ function AuditTrailView({
   error,
   data,
   result,
+  docCodeToInvoiceId,
   onRetry,
 }: {
   loading: boolean;
   error: Error | null;
   data: AuditFetchReply | null;
   result: PurchaseAuditResult | null;
+  docCodeToInvoiceId: Map<string, string>;
   onRetry: () => void;
 }) {
   if (loading)
@@ -666,24 +668,26 @@ function AuditTrailView({
           No documents in the audit set.
         </div>
       ) : (
-        result.documents.map((doc) => <AuditDocumentCard key={doc.docCode} doc={doc} />)
+        result.documents.map((doc) => (
+          <AuditDocumentCard
+            key={doc.docCode}
+            doc={doc}
+            invoiceId={docCodeToInvoiceId.get(canonicalDocCode(doc.docCode)) ?? ""}
+          />
+        ))
       )}
       <div className="app-card p-3">
         <div className="grid gap-2 md:grid-cols-3">
           <TotalBox label="Grand Debit (MYR)" value={fmt(result.grandDebit)} />
           <TotalBox label="Grand Credit (MYR)" value={fmt(result.grandCredit)} />
-          <TotalBox
-            label="Balanced"
-            value={result.balanced ? "Yes" : "No"}
-            tone={result.balanced ? "ok" : "bad"}
-          />
+          <BalanceStatusBox status={result.balanceStatus} />
         </div>
       </div>
     </div>
   );
 }
 
-function AuditDocumentCard({ doc }: { doc: AuditDocument }) {
+function AuditDocumentCard({ doc, invoiceId }: { doc: AuditDocument; invoiceId: string }) {
   return (
     <div
       className={`app-card overflow-hidden print:break-inside-avoid ${
