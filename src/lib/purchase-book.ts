@@ -178,13 +178,19 @@ function concatModels(models: PurchaseBookReportModel[]): PurchaseBookNormalized
   return { kind: "ok", models: models.length, detailItems, postingSummary };
 }
 
-/** Distinct non-cancelled doc codes returned by PurchaseBook. */
+/**
+ * Distinct non-cancelled doc codes returned by PurchaseBook. Uses the shared
+ * canonical document-key rule to deduplicate case/whitespace variants, but
+ * returns the first original casing seen so callers can display the value.
+ */
 export function purchaseBookDocCodes(n: PurchaseBookNormalized): string[] {
-  const out = new Set<string>();
+  const seen = new Map<string, string>();
   for (const d of n.detailItems) {
     if (d.isCancelled) continue;
-    const c = typeof d.docCode === "string" ? d.docCode.trim() : "";
-    if (c) out.add(c);
+    const raw = typeof d.docCode === "string" ? d.docCode.trim() : "";
+    if (!raw) continue;
+    const key = canonicalDocCode(raw);
+    if (!seen.has(key)) seen.set(key, raw);
   }
-  return [...out];
+  return [...seen.values()];
 }
