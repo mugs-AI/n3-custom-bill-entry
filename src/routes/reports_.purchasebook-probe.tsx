@@ -12,7 +12,7 @@ import { getToken } from "@/lib/auth-store";
 // shows the sanitized diagnostic JSON returned by
 // POST /api/reports/purchasebook-probe.
 
-export const Route = createFileRoute("/reports/purchasebook-probe")({
+export const Route = createFileRoute("/reports_/purchasebook-probe")({
   head: () => ({
     meta: [
       { title: "PurchaseBook Probe · Custom Bill Entry" },
