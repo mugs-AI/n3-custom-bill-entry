@@ -856,7 +856,7 @@ function PostingAccountView({
       <AuditReconcileHeader result={result} data={data} />
       {notEvaluated && (
         <div className="app-card border-l-4 border-l-destructive p-3 text-sm">
-          Posting Account Summary was not evaluated: no intersecting documents or GL rows.
+          Posting Account Summary was not evaluated: no GL rows matched the current Purchase Invoice set.
         </div>
       )}
       <div className="app-card overflow-x-auto p-3">
