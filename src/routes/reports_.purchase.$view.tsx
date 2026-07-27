@@ -134,11 +134,22 @@ interface AuditFetchReply {
   meta?: {
     piDocumentCount: number;
     accountsFetched: number;
+    accountsFromApi?: number;
+    accountsFromSuppliers?: number;
     accountsWithHits: number;
     accountsWithNoRows: string[];
     glRowsFetched: number;
     glRowsMatched: number;
     piDocSample: string[];
+    unresolvedCount?: number;
+    unresolvedRows?: Array<{
+      accountCode: string;
+      docDate: string;
+      supplierInvNo: string;
+      debit: number;
+      credit: number;
+      reason: "no-match" | "ambiguous";
+    }>;
   };
 }
 
