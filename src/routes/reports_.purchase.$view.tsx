@@ -130,20 +130,22 @@ interface AuditFetchReply {
   ok: boolean;
   kind?: string;
   error?: string;
-  pb?: PurchaseBookNormalized;
   gl?: GLRow[];
   meta?: {
-    accountCodesTried: string[];
+    piDocumentCount: number;
+    accountsFetched: number;
+    accountsWithHits: number;
     accountsWithNoRows: string[];
-    pbDetailItems: number;
-    pbPostingSummary: number;
     glRowsFetched: number;
-    piDocSample?: string[];
-    pbDocSample?: string[];
+    glRowsMatched: number;
+    piDocSample: string[];
   };
 }
 
-async function fetchAudit(filter: ReportCriteria, piDocCodes: string[]): Promise<AuditFetchReply> {
+async function fetchAudit(
+  filter: ReportCriteria,
+  piDocuments: AuditPIDocument[],
+): Promise<AuditFetchReply> {
   const token = getToken();
   if (!token) throw new Error("Not signed in to N3.");
   const res = await fetch("/api/reports/purchase-audit", {
@@ -156,7 +158,7 @@ async function fetchAudit(filter: ReportCriteria, piDocCodes: string[]): Promise
     body: JSON.stringify({
       dateFrom: filter.dateFrom,
       dateTo: filter.dateTo,
-      piDocCodes,
+      piDocuments,
     }),
   });
   const text = await res.text();
