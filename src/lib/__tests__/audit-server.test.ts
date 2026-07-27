@@ -235,8 +235,9 @@ describe("acceptance fixture: 4 PIs, 24 rows, balanced 28,673.12 each side", () 
       glAll.push(...norm);
     }
 
-    // 24 rows survive: three empty "filler" zero-value rows on SST-4000 that
-    // still carry a target docCode are kept — matching the acceptance count.
+    // 24 rows in the acceptance fixture: 18 previously-fetched debits/credits
+    // plus the four supplier control-account credits and two SST-4000
+    // continuation credits that Correction D restores.
     expect(glAll).toHaveLength(24);
 
     const r = reconcileAudit(pis, glAll);
