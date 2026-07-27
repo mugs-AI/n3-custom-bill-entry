@@ -1,45 +1,48 @@
-// Phase 3B Correction C — Purchase Audit accounting endpoint.
+// Phase 3B Correction D — Purchase Audit accounting endpoint.
 //
-// Authoritative document set = the Purchase Invoice list produced by the
-// current GL Analysis inquiry (sent as `piDocuments`). PurchaseBook is not
-// consulted.
+// Document set = the Purchase Invoice list produced by the current GL
+// Analysis inquiry (sent as `piDocuments`, now including `supplierInvNo`).
 //
 // GL discovery:
-//   1. Enumerate every active GL account via
+//   1. Enumerate active GL accounts via
 //        POST /api/reporting/GeneralLedger/GetAccountRows
-//      with `filter.includeDACandCCAC: true`.
-//   2. For each account fetch every posting via
+//      sending the GeneralLedgerFilter DIRECTLY (no `filter` wrapper),
+//      with `includeZero=false, includeDACandCCAC=true`. A successful
+//      envelope missing an account array is treated as a contract error.
+//   2. Union those accounts with every target PI `supplierCode` — supplier
+//      control accounts always ship, even when GetAccountRows omits them.
+//   3. For each account, fetch every posting via
 //        POST /api/reporting/GeneralLedger/QueryTransactionLines
 //          ?$top=500&$skip=<offset>
-//      paginated by the `{ data: { count, value[] } }` envelope, again
-//      with `filter.includeDACandCCAC: true`.
-//   3. Keep only rows whose `docCode` matches one of the caller-supplied
-//      Purchase Invoice doc codes (canonical NFKC + trim + uppercase).
+//      with the documented `{ accountCode, filter }` wrapper.
+//   4. Continuation/split rows can omit repeated accountCode/accountName/
+//      docCode fields; normalizeAccountRows restores account context and
+//      resolves blank docCodes to a unique target PI by
+//      (supplierInvNo, docDate, [supplierCode]). Ambiguous fallbacks are
+//      surfaced as unresolved rows so the audit fails incomplete rather
+//      than silently balancing.
 //
 // Bearer tokens are never echoed and upstream error messages are sanitised.
 // Accounts fetch in a 3-worker pool; pages within an account are serial.
 
 import { createFileRoute } from "@tanstack/react-router";
-import { canonicalAccountCode, canonicalDocCode } from "@/lib/report-keys";
-import type { GLRow } from "@/lib/audit-trail";
+import type { AuditPIDocument, GLRow } from "@/lib/audit-trail";
+import {
+  buildGetAccountRowsBody,
+  buildQueryTransactionLinesBody,
+  normalizeAccountRows,
+  unionAccountQueries,
+  type AccountToQuery,
+  type UnresolvedRow,
+} from "@/lib/audit-server";
+import { canonicalDocCode } from "@/lib/report-keys";
 
 const REPORTING_DEFAULT = "https://openapi-reporting.account.qne.cloud";
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const GL_PAGE_SIZE = 500;
 const GL_WORKERS = 3;
 
-interface PIDocumentIn {
-  invoiceId?: string;
-  docCode: string;
-  docDate?: string;
-  dueDate?: string;
-  supplierCode?: string;
-  supplierName?: string;
-  termCode?: string;
-  termDescription?: string;
-  currencyCode?: string;
-  currencyRate?: number;
-}
+interface PIDocumentIn extends AuditPIDocument {}
 
 interface AuditRequest {
   dateFrom: string;
@@ -55,11 +58,15 @@ interface Reply {
   meta?: {
     piDocumentCount: number;
     accountsFetched: number;
+    accountsFromApi: number;
+    accountsFromSuppliers: number;
     accountsWithHits: number;
     accountsWithNoRows: string[];
     glRowsFetched: number;
     glRowsMatched: number;
     piDocSample: string[];
+    unresolvedCount?: number;
+    unresolvedRows?: UnresolvedRow[];
   };
 }
 
@@ -147,6 +154,7 @@ function parseBody(raw: unknown): AuditRequest | { error: string } {
       dueDate: typeof rec.dueDate === "string" ? rec.dueDate : undefined,
       supplierCode: typeof rec.supplierCode === "string" ? rec.supplierCode : undefined,
       supplierName: typeof rec.supplierName === "string" ? rec.supplierName : undefined,
+      supplierInvNo: typeof rec.supplierInvNo === "string" ? rec.supplierInvNo : undefined,
       termCode: typeof rec.termCode === "string" ? rec.termCode : undefined,
       termDescription:
         typeof rec.termDescription === "string" ? rec.termDescription : undefined,
@@ -163,42 +171,37 @@ async function fetchAccountRows(
   base: string,
   token: string,
   req: AuditRequest,
-): Promise<{ ok: true; accounts: string[] } | { ok: false; message: string }> {
+): Promise<
+  | { ok: true; accounts: Array<{ accountCode: string; accountName: string }> }
+  | { ok: false; message: string }
+> {
   const url = `${base}/api/reporting/GeneralLedger/GetAccountRows`;
-  const body = {
-    filter: {
-      dateFrom: `${req.dateFrom}T00:00:00`,
-      dateTo: `${req.dateTo}T23:59:59`,
-      accountFrom: null,
-      accountTo: null,
-      accountCodes: null,
-      build: null,
-      projectIds: [] as number[],
-      projOption: -2,
-      sortBy: null,
-      includeZero: true,
-      includeDACandCCAC: true,
-    },
-  };
+  const body = buildGetAccountRowsBody(req.dateFrom, req.dateTo);
   const res = await postJson(url, token, body);
   if (!res.ok) return { ok: false, message: `HTTP ${res.status} — ${res.message}` };
   const parsed = res.parsed as { data?: unknown } | null;
-  const data = parsed && typeof parsed === "object" ? parsed.data : null;
-  const rows: unknown[] = Array.isArray(data)
-    ? data
-    : data && typeof data === "object" && Array.isArray((data as { value?: unknown[] }).value)
-      ? ((data as { value: unknown[] }).value)
-      : [];
-  const seen = new Map<string, string>();
+  const data = parsed && typeof parsed === "object" ? parsed.data : undefined;
+  let rows: unknown[] | null = null;
+  if (Array.isArray(data)) rows = data;
+  else if (data && typeof data === "object" && Array.isArray((data as { value?: unknown[] }).value))
+    rows = (data as { value: unknown[] }).value;
+  if (!rows) {
+    return {
+      ok: false,
+      message:
+        "GetAccountRows returned a successful envelope with no account array (data / data.value).",
+    };
+  }
+  const accounts: Array<{ accountCode: string; accountName: string }> = [];
   for (const r of rows) {
     if (!r || typeof r !== "object") continue;
-    const rec = r as { accountCode?: unknown };
+    const rec = r as { accountCode?: unknown; accountName?: unknown };
     const code = typeof rec.accountCode === "string" ? rec.accountCode.trim() : "";
     if (!code) continue;
-    const key = canonicalAccountCode(code);
-    if (!seen.has(key)) seen.set(key, code);
+    const name = typeof rec.accountName === "string" ? rec.accountName.trim() : "";
+    accounts.push({ accountCode: code, accountName: name });
   }
-  return { ok: true, accounts: [...seen.values()].sort((a, b) => a.localeCompare(b)) };
+  return { ok: true, accounts };
 }
 
 async function fetchGLForAccount(
@@ -213,22 +216,7 @@ async function fetchGLForAccount(
     const url =
       `${base}/api/reporting/GeneralLedger/QueryTransactionLines` +
       `?%24top=${GL_PAGE_SIZE}&%24skip=${skip}`;
-    const body = {
-      accountCode,
-      filter: {
-        dateFrom: `${req.dateFrom}T00:00:00`,
-        dateTo: `${req.dateTo}T23:59:59`,
-        accountFrom: null,
-        accountTo: null,
-        accountCodes: null,
-        build: null,
-        projectIds: [] as number[],
-        projOption: -2,
-        sortBy: null,
-        includeZero: false,
-        includeDACandCCAC: true,
-      },
-    };
+    const body = buildQueryTransactionLinesBody(accountCode, req.dateFrom, req.dateTo);
     const res = await postJson(url, token, body);
     if (!res.ok) return { ok: false, message: `HTTP ${res.status} — ${res.message}` };
 
@@ -301,50 +289,75 @@ async function handle(request: Request): Promise<Response> {
       kind: "incomplete",
       error: `Could not enumerate GL accounts: ${accountsRes.message}`,
     });
-  const accounts = accountsRes.accounts;
 
-  // 2. Fetch every posting for every discovered account.
-  const perAccount = await pool(accounts, GL_WORKERS, (code) =>
-    fetchGLForAccount(reportingBase, token, req, code).then((r) => ({ code, r })),
+  // 2. Union with every target PI supplier code so control accounts always ship.
+  const queries: AccountToQuery[] = unionAccountQueries(
+    accountsRes.accounts,
+    req.piDocuments,
   );
-  const glAll: GLRow[] = [];
+  const accountsFromSuppliers = queries.filter((q) => q.source === "target-supplier").length;
+
+  // 3. Fetch every posting for every account in the union.
+  const perAccount = await pool(queries, GL_WORKERS, (q) =>
+    fetchGLForAccount(reportingBase, token, req, q.accountCode).then((r) => ({ q, r })),
+  );
+
+  const glMatched: GLRow[] = [];
   const emptyAccounts: string[] = [];
+  const unresolved: UnresolvedRow[] = [];
   let accountsWithHits = 0;
-  for (const { code, r } of perAccount) {
+  let glRowsFetched = 0;
+  for (const { q, r } of perAccount) {
     if (!r.ok) {
       return jsonRes(502, {
         ok: false,
         kind: "incomplete",
-        error: `Could not fetch GL rows for account ${code}: ${r.message}`,
+        error: `Could not fetch GL rows for account ${q.accountCode}: ${r.message}`,
       });
     }
-    if (r.rows.length === 0) emptyAccounts.push(code);
+    glRowsFetched += r.rows.length;
+    const norm = normalizeAccountRows(q, r.rows, req.piDocuments);
+    if (norm.rows.length === 0) emptyAccounts.push(q.accountCode);
     else {
       accountsWithHits += 1;
-      glAll.push(...r.rows);
+      glMatched.push(...norm.rows);
     }
+    if (norm.unresolved.length > 0) unresolved.push(...norm.unresolved);
   }
-
-  // 3. Filter to the caller-supplied Purchase Invoice document set.
-  const wanted = new Set(req.piDocuments.map((p) => canonicalDocCode(p.docCode)));
-  const glMatched = glAll.filter((r) => wanted.has(canonicalDocCode(r.docCode)));
 
   const piDocSample = [
     ...new Set(req.piDocuments.map((p) => canonicalDocCode(p.docCode)).filter(Boolean)),
   ].slice(0, 3);
 
+  const baseMeta = {
+    piDocumentCount: req.piDocuments.length,
+    accountsFetched: queries.length,
+    accountsFromApi: queries.length - accountsFromSuppliers,
+    accountsFromSuppliers,
+    accountsWithHits,
+    accountsWithNoRows: emptyAccounts,
+    glRowsFetched,
+    glRowsMatched: glMatched.length,
+    piDocSample,
+  };
+
+  if (unresolved.length > 0) {
+    return jsonRes(200, {
+      ok: false,
+      kind: "incomplete",
+      error: `Unable to uniquely resolve ${unresolved.length} General Ledger row${unresolved.length === 1 ? "" : "s"} to a target Purchase Invoice.`,
+      meta: {
+        ...baseMeta,
+        unresolvedCount: unresolved.length,
+        unresolvedRows: unresolved,
+      },
+    });
+  }
+
   return jsonRes(200, {
     ok: true,
     gl: glMatched,
-    meta: {
-      piDocumentCount: req.piDocuments.length,
-      accountsFetched: accounts.length,
-      accountsWithHits,
-      accountsWithNoRows: emptyAccounts,
-      glRowsFetched: glAll.length,
-      glRowsMatched: glMatched.length,
-      piDocSample,
-    },
+    meta: baseMeta,
   });
 }
 
