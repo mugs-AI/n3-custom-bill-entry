@@ -179,34 +179,38 @@ describe("acceptance fixture: 4 PIs, 24 rows, balanced 28,673.12 each side", () 
 
   // Debits sourced from per-account query context, keyed by (accountCode).
   const debitRowsByAcct: Record<string, GLRow[]> = {
-    "100-0500": [{ docCode: "M1B2607002", accountCode: "100-0500", accountName: "OVERCHARGE", debitLocal: 7380, creditLocal: 0 }],
+    "100-0500": [
+      { docCode: "M1B2607002", accountCode: "100-0500", accountName: "OVERCHARGE", debitLocal: 3690, creditLocal: 0 },
+      { docCode: "M1B2607002", accountCode: "100-0500", accountName: "OVERCHARGE", debitLocal: 3690, creditLocal: 0 },
+    ],
     "150-0200": [{ docCode: "M1B2607001", accountCode: "150-0200", accountName: "DISCOUNT ALLOWED", debitLocal: 200, creditLocal: 0 }],
     "201-0002": [
       { docCode: "M1B2607002Ikeyinn3", accountCode: "201-0002", accountName: "PURCHASES - SOFTWARE", debitLocal: 985, creditLocal: 0 },
-      { docCode: "M1B2607001", accountCode: "201-0002", accountName: "PURCHASES - SOFTWARE", debitLocal: 7815, creditLocal: 0 },
+      { docCode: "M1B2607001", accountCode: "201-0002", accountName: "PURCHASES - SOFTWARE", debitLocal: 3915, creditLocal: 0 },
+      { docCode: "M1B2607001", accountCode: "201-0002", accountName: "PURCHASES - SOFTWARE", debitLocal: 3900, creditLocal: 0 },
     ],
     "300-0400": [{ docCode: "M1B2607003", accountCode: "300-0400", accountName: "DIVIDEND RECEIVED", debitLocal: 2093, creditLocal: 0 }],
     "300-0500": [{ docCode: "M1B2607002", accountCode: "300-0500", accountName: "FIXED DEPOSIT INTEREST", debitLocal: 7380, creditLocal: 0 }],
     "300-2000": [{ docCode: "M1B2607003", accountCode: "300-2000", accountName: "OTHER INCOME", debitLocal: 1196, creditLocal: 0 }],
     "300-9000": [
-      { docCode: "M1B2607001", accountCode: "300-9000", accountName: "ROUNDING ADJUSTMENT", debitLocal: 500, creditLocal: 0 },
+      { docCode: "M1B2607001", accountCode: "300-9000", accountName: "ROUNDING ADJUSTMENT", debitLocal: 250, creditLocal: 0 },
+      { docCode: "M1B2607001", accountCode: "300-9000", accountName: "ROUNDING ADJUSTMENT", debitLocal: 250, creditLocal: 0 },
       { docCode: "M1B2607003", accountCode: "300-9000", accountName: "ROUNDING ADJUSTMENT", debitLocal: 200, creditLocal: 0 },
     ],
     "SST-3000": [
-      { docCode: "M1B2607001", accountCode: "SST-3000", accountName: "SST PURCHASE TAX", debitLocal: 469, creditLocal: 0 },
-      { docCode: "M1B2607002", accountCode: "SST-3000", accountName: "SST PURCHASE TAX", debitLocal: 0, creditLocal: 0 },
+      { docCode: "M1B2607001", accountCode: "SST-3000", accountName: "SST PURCHASE TAX", debitLocal: 234.5, creditLocal: 0 },
+      { docCode: "M1B2607001", accountCode: "SST-3000", accountName: "SST PURCHASE TAX", debitLocal: 234.5, creditLocal: 0 },
       { docCode: "M1B2607003", accountCode: "SST-3000", accountName: "SST PURCHASE TAX", debitLocal: 96, creditLocal: 0 },
     ],
     "SST-4000": [
-      // Six rows on SST-4000: three debit rows and three continuation credit
-      // rows with blank docCodes that must resolve via supplierInvNo+date.
-      { docCode: "M1B2607001", accountCode: "SST-4000", accountName: "SST EXPENSES SERVICE TAX", debitLocal: 392, creditLocal: 0 },
-      { docCode: "M1B2607003", accountCode: "SST-4000", accountName: "SST EXPENSES SERVICE TAX", debitLocal: 0, creditLocal: 0 }, // filler
+      // Three debit rows summing to 359.12 plus two blank-docCode
+      // continuation credits (167.44 + 95.68 = 263.12) that must resolve
+      // to M1B2607003 via supplierInvNo + docDate.
+      { docCode: "M1B2607001", accountCode: "SST-4000", accountName: "SST EXPENSES SERVICE TAX", debitLocal: 100, creditLocal: 0 },
+      { docCode: "M1B2607002", accountCode: "SST-4000", accountName: "SST EXPENSES SERVICE TAX", debitLocal: 100, creditLocal: 0 },
+      { docCode: "M1B2607003", accountCode: "SST-4000", accountName: "SST EXPENSES SERVICE TAX", debitLocal: 159.12, creditLocal: 0 },
       { docCode: "", accountCode: "", supplierInvNo: "M1B2607003", docDate: "2026-07-26", debitLocal: 0, creditLocal: 167.44 },
       { docCode: "", accountCode: "", supplierInvNo: "M1B2607003", docDate: "2026-07-26", debitLocal: 0, creditLocal: 95.68 },
-      { docCode: "M1B2607001", accountCode: "SST-4000", accountName: "SST EXPENSES SERVICE TAX", debitLocal: 0, creditLocal: 0 }, // filler
-      // Balance debits so SST-4000 rolls up to 359.12 Dr, 263.12 Cr.
-      { docCode: "M1B2607003", accountCode: "SST-4000", accountName: "SST EXPENSES SERVICE TAX", debitLocal: -32.88, creditLocal: 0 },
     ],
     "800-C003": [
       { docCode: "M1B2607001", accountCode: "800-C003", accountName: "CHEOW HOLDING SDN BHD", debitLocal: 0, creditLocal: 9376 },
