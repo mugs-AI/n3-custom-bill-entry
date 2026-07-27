@@ -787,30 +787,28 @@ function AuditReconcileHeader({
   return (
     <div className="app-card p-3 text-[12px]">
       <div className="grid gap-2 md:grid-cols-4">
-        <MiniStat label="PB detail items" value={String(data.meta?.pbDetailItems ?? 0)} />
-        <MiniStat label="PB posting rows" value={String(data.meta?.pbPostingSummary ?? 0)} />
-        <MiniStat label="GL rows in audit set" value={String(result.glRowsUsed)} />
-        <MiniStat label="Documents reconciled" value={String(result.documents.length)} />
+        <MiniStat label="Target PIs" value={String(data.meta?.piDocumentCount ?? 0)} />
+        <MiniStat
+          label="Active GL accounts scanned"
+          value={String(data.meta?.accountsFetched ?? 0)}
+        />
+        <MiniStat label="GL rows matched" value={String(result.glRowsUsed)} />
+        <MiniStat
+          label="Documents reconciled"
+          value={String(result.documents.length)}
+        />
       </div>
-      <div className="mt-2">
-        {result.summaryCheck.kind === "matched" && (
-          <span className="text-success">
-            PB posting summary reconciles (convention: {result.summaryCheck.convention}).
+      {result.docsWithoutGL.length > 0 && (
+        <div className="mt-2 text-destructive">
+          {result.docsWithoutGL.length} Purchase Invoice
+          {result.docsWithoutGL.length === 1 ? "" : "s"} had no matching GL
+          postings:{" "}
+          <span className="tabular">
+            {result.docsWithoutGL.slice(0, 6).join(", ")}
+            {result.docsWithoutGL.length > 6 ? "…" : ""}
           </span>
-        )}
-        {result.summaryCheck.kind === "skipped" && (
-          <span className="text-muted-foreground">{result.summaryCheck.reason}</span>
-        )}
-        {result.summaryCheck.kind === "mismatch" && (
-          <span className="text-destructive">
-            PB posting summary does NOT reconcile with GL
-            {result.summaryCheck.accounts.length > 0
-              ? ` (accounts: ${result.summaryCheck.accounts.join(", ")})`
-              : ""}
-            .
-          </span>
-        )}
-      </div>
+        </div>
+      )}
       {result.incompleteReasons.length > 0 && (
         <ul className="mt-2 list-disc pl-5 text-destructive">
           {result.incompleteReasons.map((r) => (
