@@ -1,146 +1,138 @@
 import { describe, it, expect } from "vitest";
 import {
   buildAuditDocuments,
-  computeAuditDocCodes,
   reconcileAudit,
+  type AuditPIDocument,
   type GLRow,
 } from "../audit-trail";
-import type { PurchaseBookDetailItem, PurchaseBookPostingSummaryRow } from "../purchase-book";
 
-// Phase 3B item 6 — per-document Debit/Credit balance and grand-total balance.
-// Also covers items 5 (amount mapping semantics preserved via straight passthrough)
-// and the sign-convention detection in the posting-summary reconciliation.
+// Phase 3B Correction C — Purchase Audit is driven by the current Purchase
+// Invoice list. PurchaseBook is no longer consulted.
 
-const PB_DETAILS: PurchaseBookDetailItem[] = [
+const PIS: AuditPIDocument[] = [
   {
+    invoiceId: "id-a",
     docCode: "PI-A",
     docDate: "2026-07-24",
-    isCancelled: false,
     supplierCode: "S100",
     supplierName: "Acme Supplies",
     termDescription: "30 Days",
     dueDate: "2026-08-23",
   },
   {
+    invoiceId: "id-b",
     docCode: "PI-B",
     docDate: "2026-07-25",
-    isCancelled: false,
     supplierCode: "S200",
     supplierName: "Beta Corp",
   },
-  { docCode: "PI-C", docDate: "2026-07-26", isCancelled: true, supplierCode: "S300" },
 ];
 
 const GL_ROWS: GLRow[] = [
-  // PI-A: creditor (S100), materials, tax — balances 105/105
   { docCode: "PI-A", accountCode: "S100", accountName: "Acme Supplies", debitLocal: 0, creditLocal: 105 },
   { docCode: "PI-A", accountCode: "6110", accountName: "Materials", debitLocal: 100, creditLocal: 0 },
   { docCode: "PI-A", accountCode: "5210", accountName: "Input Tax", debitLocal: 5, creditLocal: 0 },
-  // PI-B: creditor (S200), materials — balances 200/200
   { docCode: "PI-B", accountCode: "S200", accountName: "Beta Corp", debitLocal: 0, creditLocal: 200 },
   { docCode: "PI-B", accountCode: "6110", accountName: "Materials", debitLocal: 200, creditLocal: 0 },
-  // cancelled must be ignored:
-  { docCode: "PI-C", accountCode: "S300", debitLocal: 0, creditLocal: 500, isCancelled: true },
+  { docCode: "PI-Ignored", accountCode: "SX", debitLocal: 0, creditLocal: 999 },
 ];
 
-const PB_SUMMARY: PurchaseBookPostingSummaryRow[] = [
-  { accountCode: "S100", amount: -105 },
-  { accountCode: "S200", amount: -200 },
-  { accountCode: "6110", amount: 300 },
-  { accountCode: "5210", amount: 5 },
-];
-
-describe("Purchase Audit Trail reconciliation", () => {
-  it("computes the intersection of PB and PI doc sets, ignoring cancelled PB rows", () => {
-    const r = computeAuditDocCodes(PB_DETAILS, ["PI-A", "PI-B", "PI-Z"]);
-    expect(r.audit).toEqual(["PI-A", "PI-B"]);
-    expect(r.piOnly).toEqual(["PI-Z"]);
-    expect(r.pbOnly).toEqual([]);
-    expect(r.identical).toBe(false);
-  });
-
-  it("buildAuditDocuments balances Debit and Credit per document", () => {
-    const docs = buildAuditDocuments(PB_DETAILS, GL_ROWS, ["PI-A", "PI-B"]);
-    expect(docs).toHaveLength(2);
-    for (const d of docs) {
+describe("Purchase Audit reconciliation (PI-driven)", () => {
+  it("builds one document per Purchase Invoice with balanced Debit/Credit", () => {
+    const r = reconcileAudit(PIS, GL_ROWS);
+    expect(r.documents).toHaveLength(2);
+    for (const d of r.documents) {
       expect(d.debit).toBe(d.credit);
       expect(d.balanced).toBe(true);
-      expect(d.incomplete).toBe(false);
+      expect(d.creditor).not.toBeNull();
     }
-    // Creditor line is identified and separated.
-    const a = docs.find((d) => d.docCode === "PI-A")!;
-    expect(a.creditor?.accountCode).toBe("S100");
-    expect(a.postings.map((p) => p.accountCode).sort()).toEqual(["5210", "6110"]);
-  });
-
-  it("reconcileAudit reports Grand balance, matched convention, and completeness", () => {
-    const r = reconcileAudit(PB_DETAILS, PB_SUMMARY, GL_ROWS, ["PI-A", "PI-B"]);
     expect(r.grandDebit).toBe(305);
     expect(r.grandCredit).toBe(305);
-    expect(r.balanced).toBe(true);
-    // PI-C in PB is cancelled and PI-Z isn't in PI: PB active vs PI both = {PI-A, PI-B} → identical.
-    expect(r.summaryCheck.kind).toBe("matched");
-    if (r.summaryCheck.kind === "matched") {
-      expect(r.summaryCheck.convention).toBe("positive-debit");
-    }
+    expect(r.balanceStatus).toBe("balanced");
     expect(r.isComplete).toBe(true);
-    expect(r.incompleteReasons).toEqual([]);
+    expect(r.glRowsUsed).toBe(5); // PI-Ignored filtered out
+    expect(r.postingAccounts.map((p) => p.accountCode).sort()).toEqual([
+      "5210",
+      "6110",
+      "S100",
+      "S200",
+    ]);
   });
 
-  it("skips the signed posting-summary check when PB and PI doc sets differ", () => {
-    const r = reconcileAudit(PB_DETAILS, PB_SUMMARY, GL_ROWS, ["PI-A"]);
-    expect(r.summaryCheck.kind).toBe("skipped");
-  });
-
-  it("flags an unbalanced document as incomplete", () => {
-    const bad: GLRow[] = [
-      { docCode: "PI-X", accountCode: "SX", debitLocal: 0, creditLocal: 100 },
-      { docCode: "PI-X", accountCode: "6110", debitLocal: 90, creditLocal: 0 },
+  it("aggregates multiple GL creditor rows into a single creditor line", () => {
+    const pis: AuditPIDocument[] = [
+      { invoiceId: "x", docCode: "PI-X", supplierCode: "S100", supplierName: "Acme" },
     ];
-    const pb: PurchaseBookDetailItem[] = [{ docCode: "PI-X", supplierCode: "SX" }];
-    const r = reconcileAudit(pb, [], bad, ["PI-X"]);
-    expect(r.balanced).toBe(false);
-    expect(r.isComplete).toBe(false);
-    expect(r.documents[0].balanced).toBe(false);
-    expect(r.documents[0].incomplete).toBe(true);
+    const gl: GLRow[] = [
+      { docCode: "PI-X", accountCode: "S100", debitLocal: 0, creditLocal: 60 },
+      { docCode: "PI-X", accountCode: "S100", debitLocal: 0, creditLocal: 40 },
+      { docCode: "PI-X", accountCode: "6110", debitLocal: 100, creditLocal: 0 },
+    ];
+    const r = reconcileAudit(pis, gl);
+    expect(r.documents[0].creditor?.credit).toBe(100);
+    expect(r.documents[0].creditor?.debit).toBe(0);
+    expect(r.documents[0].balanced).toBe(true);
+    expect(r.balanceStatus).toBe("balanced");
   });
 
-  it("case-insensitively joins PB, PI and GL doc codes (Phase 3B Correction B)", () => {
-    // PB, PI and GL each use a different casing / whitespace shape for the
-    // same document. Canonical joins must fold all three onto one audit doc.
-    const pb: PurchaseBookDetailItem[] = [
-      { docCode: "pi-a", supplierCode: "s100", supplierName: "Acme" },
+  it("keeps a PI with no GL rows and flags it incomplete", () => {
+    const pis: AuditPIDocument[] = [
+      ...PIS,
+      { invoiceId: "z", docCode: "PI-Z", supplierCode: "S1" },
+    ];
+    const r = reconcileAudit(pis, GL_ROWS);
+    const z = r.documents.find((d) => d.docCode === "PI-Z");
+    expect(z).toBeDefined();
+    expect(z!.incomplete).toBe(true);
+    expect(z!.creditor).toBeNull();
+    expect(z!.postings).toEqual([]);
+    expect(r.docsWithoutGL).toContain("PI-Z");
+    expect(r.balanceStatus).toBe("unbalanced");
+    expect(r.isComplete).toBe(false);
+  });
+
+  it("case-insensitively joins PI and GL doc/account codes", () => {
+    const pis: AuditPIDocument[] = [
+      { invoiceId: "a", docCode: "pi-a", supplierCode: "s100" },
     ];
     const gl: GLRow[] = [
       { docCode: " PI-A ", accountCode: "S100", debitLocal: 0, creditLocal: 105 },
       { docCode: "pi-a", accountCode: "6110", debitLocal: 100, creditLocal: 0 },
       { docCode: "PI-A", accountCode: "5210", debitLocal: 5, creditLocal: 0 },
     ];
-    const r = reconcileAudit(pb, [], gl, ["PI-A"]);
-    expect(r.auditDocCodes).toEqual(["PI-A"]);
+    const r = reconcileAudit(pis, gl);
     expect(r.documents).toHaveLength(1);
     expect(r.documents[0].balanced).toBe(true);
     expect(r.documents[0].creditor?.accountCode).toBe("S100");
     expect(r.glRowsUsed).toBe(3);
-    expect(r.balanceStatus).toBe("balanced");
   });
 
-  it("returns balanceStatus 'not-evaluated' when the audit intersection is empty", () => {
-    // PB and PI have zero overlap → nothing to evaluate. The UI must NOT
-    // show "Balanced: Yes" in this state.
-    const r = reconcileAudit(PB_DETAILS, PB_SUMMARY, GL_ROWS, ["PI-ZZZ"]);
-    expect(r.auditDocCodes).toEqual([]);
+  it("returns 'not-evaluated' when no GL rows match any PI", () => {
+    const r = reconcileAudit(PIS, []);
     expect(r.balanceStatus).toBe("not-evaluated");
     expect(r.balanced).toBe(false);
-    expect(r.isComplete).toBe(false);
-    expect(r.summaryCheck.kind).toBe("skipped");
-  });
-
-  it("returns balanceStatus 'not-evaluated' when GL has no rows for the intersection", () => {
-    const r = reconcileAudit(PB_DETAILS, PB_SUMMARY, [], ["PI-A", "PI-B"]);
-    expect(r.auditDocCodes).toEqual(["PI-A", "PI-B"]);
     expect(r.glRowsUsed).toBe(0);
-    expect(r.balanceStatus).toBe("not-evaluated");
-    expect(r.balanced).toBe(false);
+    expect(r.docsWithoutGL.length).toBe(PIS.length);
+  });
+
+  it("excludes cancelled and balance-brought-forward GL rows", () => {
+    const gl: GLRow[] = [
+      { docCode: "PI-A", accountCode: "S100", debitLocal: 0, creditLocal: 100, isCancelled: true },
+      { docCode: "PI-A", accountCode: "S100", debitLocal: 0, creditLocal: 100, isBalanceBF: true },
+      { docCode: "PI-A", accountCode: "S100", debitLocal: 0, creditLocal: 100 },
+      { docCode: "PI-A", accountCode: "6110", debitLocal: 100, creditLocal: 0 },
+    ];
+    const r = reconcileAudit([PIS[0]], gl);
+    expect(r.glRowsUsed).toBe(2);
+    expect(r.documents[0].balanced).toBe(true);
+  });
+
+  it("buildAuditDocuments alone preserves PI header metadata", () => {
+    const docs = buildAuditDocuments(PIS, GL_ROWS);
+    const a = docs.find((d) => d.docCode === "PI-A")!;
+    expect(a.invoiceId).toBe("id-a");
+    expect(a.supplierName).toBe("Acme Supplies");
+    expect(a.termDescription).toBe("30 Days");
+    expect(a.dueDate).toBe("2026-08-23");
   });
 });
