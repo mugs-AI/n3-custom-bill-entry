@@ -280,6 +280,7 @@ function PurchaseReportPage() {
         docDate: l.docDate,
         supplierCode: l.supplierCode,
         supplierName: l.supplierName,
+        supplierInvNo: l.supplierInvNo,
         termDescription: l.paymentType,
       });
     }
