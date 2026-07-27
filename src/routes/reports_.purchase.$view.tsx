@@ -666,9 +666,9 @@ function AuditTrailView({
   if (loading)
     return (
       <div className="app-card p-6 text-sm text-muted-foreground">
-        <div>Fetching PurchaseBook…</div>
-        <div>Fetching General Ledger transactions per posting account…</div>
-        <div>Reconciling…</div>
+        <div>Enumerating active GL accounts…</div>
+        <div>Fetching General Ledger transactions per account…</div>
+        <div>Reconciling against the current Purchase Invoice set…</div>
       </div>
     );
   if (error)
