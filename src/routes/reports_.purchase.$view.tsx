@@ -252,14 +252,32 @@ function PurchaseReportPage() {
     return mutated ? { ...rawCached, lines } : rawCached;
   }, [rawCached, tariffMap]);
 
-  const piDocCodes = useMemo(() => {
-    if (!cached) return [] as string[];
-    return [...new Set(cached.lines.map((l) => l.invoiceId ? l.docCode : "").filter(Boolean))];
+  // Correction C: Purchase Audit reads the current GL Analysis inquiry as
+  // its authoritative document set. One AuditPIDocument per Purchase
+  // Invoice, deduplicated by canonical docCode. Term/currency default to
+  // display-only values when not surfaced through GLDrillDownLine.
+  const piDocuments = useMemo<AuditPIDocument[]>(() => {
+    if (!cached) return [];
+    const seen = new Map<string, AuditPIDocument>();
+    for (const l of cached.lines) {
+      if (!l.docCode) continue;
+      const key = canonicalDocCode(l.docCode);
+      if (!key || seen.has(key)) continue;
+      seen.set(key, {
+        invoiceId: l.invoiceId,
+        docCode: l.docCode,
+        docDate: l.docDate,
+        supplierCode: l.supplierCode,
+        supplierName: l.supplierName,
+        termDescription: l.paymentType,
+      });
+    }
+    return [...seen.values()];
   }, [cached]);
 
   // Canonical doc-code -> immutable N3 invoice id, built once from the
-  // current GL Analysis report. Task 5: Audit Trail PI numbers use this map
-  // to link into /purchase-invoices/{invoiceId}/edit without an extra fetch.
+  // current GL Analysis report. Audit Trail PI numbers use this map to
+  // link into /purchase-invoices/{invoiceId}/edit without an extra fetch.
   const docCodeToInvoiceId = useMemo(() => {
     const m = new Map<string, string>();
     if (!cached) return m;
@@ -275,18 +293,18 @@ function PurchaseReportPage() {
   const isAccountingView = viewId === "audit-trail" || viewId === "posting-account";
 
   const auditQ = useQuery<AuditFetchReply, Error>({
-    queryKey: ["purchase-audit", inquiry?.filter, piDocCodes],
-    enabled: hydrated && !!token && !!cached && isAccountingView && piDocCodes.length > 0,
-    queryFn: () => fetchAudit(inquiry!.filter, piDocCodes),
+    queryKey: ["purchase-audit", inquiry?.filter, piDocuments.length],
+    enabled: hydrated && !!token && !!cached && isAccountingView && piDocuments.length > 0,
+    queryFn: () => fetchAudit(inquiry!.filter, piDocuments),
     staleTime: 5 * 60_000,
     retry: false,
   });
 
   const auditResult: PurchaseAuditResult | null = useMemo(() => {
     const data = auditQ.data;
-    if (!data?.ok || !data.pb || !data.gl) return null;
-    return reconcileAudit(data.pb.detailItems, data.pb.postingSummary, data.gl, piDocCodes);
-  }, [auditQ.data, piDocCodes]);
+    if (!data?.ok || !data.gl) return null;
+    return reconcileAudit(piDocuments, data.gl);
+  }, [auditQ.data, piDocuments]);
 
   // Header
   return (
