@@ -52,6 +52,9 @@ export interface AuditPIDocument {
   dueDate?: string;
   supplierCode?: string;
   supplierName?: string;
+  /** Supplier invoice number — required to resolve continuation GL rows
+   *  whose docCode was omitted by N3. */
+  supplierInvNo?: string;
   termCode?: string;
   termDescription?: string;
   currencyCode?: string;
