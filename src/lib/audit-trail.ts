@@ -1,24 +1,22 @@
-// Purchase Audit Trail reconciliation (Phase 3B Views 1-2).
+// Purchase Audit Trail reconciliation — Phase 3B Correction C.
 //
-// Pure helpers that take PurchaseBook, GL and the current Purchase Invoice
-// audit doc-code set and:
-//   1. Determine the final audit document set = intersection(PB, PI) using
-//      the shared canonical document-key rule (NFKC + trim + uppercase).
-//   2. Group GL rows per document (canonical docCode match) and per posting
-//      account (canonical accountCode).
-//   3. Check per-document Debit/Credit balance, Grand Debit/Credit balance,
-//      and — only when the PB doc set equals the PI doc set — check the
-//      signed PB postingSummary against `glNet = debit - credit`.
-//   4. Return a `PurchaseAuditResult` explicitly flagging incomplete/
-//      incompleteReason and an explicit balanceStatus so the UI never shows
-//      "Balanced: Yes" when nothing was evaluated.
+// PurchaseBook is no longer a gate or filter. The authoritative audit
+// document set is the Purchase Invoice list already produced by the current
+// GL Analysis inquiry. For every PI in that list we:
+//
+//   1. Match GL rows by canonical docCode (NFKC + trim + uppercase).
+//   2. Identify the creditor line(s) where canonical(accountCode) equals
+//      canonical(pi.supplierCode). Multiple creditor rows are aggregated
+//      into a single displayed creditor line.
+//   3. Compute per-document Debit/Credit and Grand Debit/Credit from the
+//      matched GL rows only. A document with zero GL rows is retained but
+//      flagged incomplete — it never disappears from the report.
+//
+// No comparison is made between GL Grand Debit and the PI Including-Tax
+// totals from GL Analysis, and no PurchaseBook postingSummary check is
+// performed. Both are legitimately different figures.
 
 import { round2, sumTo2dp } from "./money";
-import {
-  purchaseBookSupplierCode,
-  type PurchaseBookDetailItem,
-  type PurchaseBookPostingSummaryRow,
-} from "./purchase-book";
 import { canonicalAccountCode, canonicalDocCode } from "./report-keys";
 
 export interface GLRow {
@@ -42,6 +40,24 @@ export interface GLRow {
   projectName?: string;
 }
 
+/**
+ * Purchase Invoice header projection consumed by the audit reconciliation.
+ * Sourced from the current GL Analysis inquiry — no PurchaseBook needed.
+ * Term/Currency fields are display-only and safe to leave blank.
+ */
+export interface AuditPIDocument {
+  invoiceId?: string;
+  docCode: string;
+  docDate?: string;
+  dueDate?: string;
+  supplierCode?: string;
+  supplierName?: string;
+  termCode?: string;
+  termDescription?: string;
+  currencyCode?: string;
+  currencyRate?: number;
+}
+
 export interface PostingRow {
   accountCode: string;
   accountName: string;
@@ -54,12 +70,15 @@ export interface PostingRow {
 }
 
 export interface AuditDocument {
+  invoiceId: string;
   docCode: string;
   docDate: string;
   supplierCode: string;
   supplierName: string;
   termDescription: string;
   dueDate: string;
+  currencyCode: string;
+  currencyRate: number;
   creditor: PostingRow | null;
   postings: PostingRow[];
   debit: number;
@@ -87,12 +106,10 @@ export interface PurchaseAuditResult {
   balanceStatus: BalanceStatus;
   isComplete: boolean;
   incompleteReasons: string[];
-  summaryCheck:
-    | { kind: "matched"; convention: "positive-debit" | "positive-credit" }
-    | { kind: "mismatch"; accounts: string[] }
-    | { kind: "skipped"; reason: string };
   auditDocCodes: string[];
   glRowsUsed: number;
+  /** PI docCodes that produced zero matching GL rows. */
+  docsWithoutGL: string[];
 }
 
 function safeNum(v: unknown): number {
@@ -100,40 +117,9 @@ function safeNum(v: unknown): number {
 }
 
 /**
- * Compute the audit doc-code set — the case-insensitive intersection of PB
- * (non-cancelled) and the current Purchase Invoice set. Returns original PI
- * casings so the UI displays the value N3's main API returned.
+ * Filter GL rows down to the audit doc set, excluding cancelled and B/F.
+ * Match is case/whitespace-insensitive on docCode.
  */
-export function computeAuditDocCodes(
-  pbDetails: PurchaseBookDetailItem[],
-  piDocCodes: string[],
-): { audit: string[]; pbOnly: string[]; piOnly: string[]; identical: boolean } {
-  const pb = new Map<string, string>();
-  for (const d of pbDetails) {
-    if (d.isCancelled) continue;
-    const raw = typeof d.docCode === "string" ? d.docCode.trim() : "";
-    if (!raw) continue;
-    const key = canonicalDocCode(raw);
-    if (!pb.has(key)) pb.set(key, raw);
-  }
-  const pi = new Map<string, string>();
-  for (const raw of piDocCodes) {
-    const trimmed = typeof raw === "string" ? raw.trim() : "";
-    if (!trimmed) continue;
-    const key = canonicalDocCode(trimmed);
-    if (!pi.has(key)) pi.set(key, trimmed);
-  }
-  const audit: string[] = [];
-  for (const [key, raw] of pi) if (pb.has(key)) audit.push(raw);
-  audit.sort((a, b) => a.localeCompare(b));
-  const pbOnly: string[] = [];
-  for (const [key, raw] of pb) if (!pi.has(key)) pbOnly.push(raw);
-  const piOnly: string[] = [];
-  for (const [key, raw] of pi) if (!pb.has(key)) piOnly.push(raw);
-  return { audit, pbOnly, piOnly, identical: pbOnly.length === 0 && piOnly.length === 0 };
-}
-
-/** Filter GL rows to the final audit doc set, excluding cancelled and B/F. */
 export function filterAuditGL(rows: GLRow[], auditDocCodes: string[]): GLRow[] {
   const set = new Set(auditDocCodes.map(canonicalDocCode));
   return rows.filter((r) => {
@@ -156,15 +142,30 @@ function toPosting(r: GLRow, isCreditor: boolean): PostingRow {
   };
 }
 
+function aggregateCreditor(rows: GLRow[]): PostingRow | null {
+  if (rows.length === 0) return null;
+  const first = rows[0];
+  const debit = round2(sumTo2dp(rows.map((r) => safeNum(r.debitLocal))));
+  const credit = round2(sumTo2dp(rows.map((r) => safeNum(r.creditLocal))));
+  return {
+    accountCode: (first.accountCode ?? "").trim(),
+    accountName: first.accountName ?? "",
+    currencyCode: first.currencyCode ?? "MYR",
+    currencyRate: safeNum(first.currencyRate) || 1,
+    debit,
+    credit,
+    isSupplierCreditor: true,
+    isTaxPosting: false,
+  };
+}
+
 /**
- * Build the per-document audit view. Creditor line is identified by matching
- * the GL row's canonical `accountCode` against the PurchaseBook supplier code
- * (canonical), so PB-vs-GL casing differences never split the join.
+ * Build one AuditDocument per Purchase Invoice. Documents with no matching
+ * GL rows are retained and flagged incomplete.
  */
 export function buildAuditDocuments(
-  pbDetails: PurchaseBookDetailItem[],
+  piDocuments: AuditPIDocument[],
   glRows: GLRow[],
-  auditDocCodes: string[],
 ): AuditDocument[] {
   const glByDoc = new Map<string, GLRow[]>();
   for (const r of glRows) {
@@ -173,62 +174,52 @@ export function buildAuditDocuments(
     if (!glByDoc.has(c)) glByDoc.set(c, []);
     glByDoc.get(c)!.push(r);
   }
-  const pbByDoc = new Map<string, PurchaseBookDetailItem>();
-  for (const d of pbDetails) {
-    const c = canonicalDocCode(d.docCode);
-    if (c && !pbByDoc.has(c)) pbByDoc.set(c, d);
-  }
   const out: AuditDocument[] = [];
-  for (const code of auditDocCodes) {
-    const key = canonicalDocCode(code);
-    const pb = pbByDoc.get(key);
+  const seen = new Set<string>();
+  for (const pi of piDocuments) {
+    const key = canonicalDocCode(pi.docCode);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
     const rows = glByDoc.get(key) ?? [];
-    const supplierCode = purchaseBookSupplierCode(pb);
-    const supplierKey = canonicalAccountCode(supplierCode);
+    const supplierKey = canonicalAccountCode(pi.supplierCode ?? "");
     const creditorRows = supplierKey
       ? rows.filter((r) => canonicalAccountCode(r.accountCode) === supplierKey)
       : [];
     const otherRows = supplierKey
       ? rows.filter((r) => canonicalAccountCode(r.accountCode) !== supplierKey)
       : rows.slice();
-
+    const creditor = aggregateCreditor(creditorRows);
+    const postings = otherRows.map((r) => toPosting(r, false));
     const debit = round2(sumTo2dp(rows.map((r) => safeNum(r.debitLocal))));
     const credit = round2(sumTo2dp(rows.map((r) => safeNum(r.creditLocal))));
-    const balanced = Math.abs(debit - credit) < 0.011;
-
-    let creditor: PostingRow | null = null;
-    let postings: PostingRow[];
-    let incomplete = rows.length === 0;
-    let incompleteReason = rows.length === 0 ? "No matching GL postings found." : undefined;
-
-    if (creditorRows.length === 1) {
-      creditor = toPosting(creditorRows[0], true);
-      postings = otherRows.map((r) => toPosting(r, false));
-    } else {
-      postings = rows.map((r) => toPosting(r, false));
-      if (rows.length > 0) {
-        incomplete = true;
-        incompleteReason = supplierCode
-          ? `Could not uniquely identify creditor posting for ${supplierCode} (${creditorRows.length} matches).`
-          : "PurchaseBook did not supply a supplier code for creditor matching.";
-      }
-    }
-
+    const hasRows = rows.length > 0;
+    const balanced = hasRows && Math.abs(debit - credit) < 0.011;
+    const incomplete = !hasRows || !balanced;
+    const incompleteReason = !hasRows
+      ? "No matching GL postings found for this Purchase Invoice."
+      : !balanced
+        ? "Document Debit and Credit do not balance."
+        : undefined;
     out.push({
-      docCode: code,
-      docDate: pb?.docDate ?? "",
-      supplierCode,
-      supplierName: pb?.supplierName ?? "",
-      termDescription: pb?.termDescription ?? pb?.termCode ?? "",
-      dueDate: pb?.dueDate ?? "",
+      invoiceId: pi.invoiceId ?? "",
+      docCode: pi.docCode,
+      docDate: pi.docDate ?? "",
+      supplierCode: pi.supplierCode ?? "",
+      supplierName: pi.supplierName ?? "",
+      termDescription: pi.termDescription ?? pi.termCode ?? "",
+      dueDate: pi.dueDate ?? "",
+      currencyCode: pi.currencyCode ?? "MYR",
+      currencyRate:
+        typeof pi.currencyRate === "number" && Number.isFinite(pi.currencyRate)
+          ? pi.currencyRate
+          : 1,
       creditor,
       postings,
       debit,
       credit,
       balanced,
-      incomplete: incomplete || !balanced,
-      incompleteReason:
-        incompleteReason ?? (!balanced ? "Document Debit and Credit do not balance." : undefined),
+      incomplete,
+      incompleteReason,
     });
   }
   out.sort(
@@ -239,7 +230,7 @@ export function buildAuditDocuments(
 
 /**
  * Aggregate GL rows by canonical account code → View 2 rows. The first
- * original casing seen is used for display so the operator sees the account
+ * original casing seen is displayed so the operator sees the account
  * exactly as N3 stored it.
  */
 export function summarizePostingAccounts(rows: GLRow[]): PostingAccountRow[] {
@@ -260,85 +251,51 @@ export function summarizePostingAccounts(rows: GLRow[]): PostingAccountRow[] {
 }
 
 /**
- * Full audit reconciliation. `pbOnly` / `piOnly` in the doc-set comparison
- * decide whether the PB signed posting-summary check is meaningful.
+ * Reconcile the PI-driven audit set against the matched GL rows.
  */
 export function reconcileAudit(
-  pbDetails: PurchaseBookDetailItem[],
-  pbSummary: PurchaseBookPostingSummaryRow[],
+  piDocuments: AuditPIDocument[],
   glRows: GLRow[],
-  piDocCodes: string[],
 ): PurchaseAuditResult {
-  const { audit, pbOnly, identical } = computeAuditDocCodes(pbDetails, piDocCodes);
-  const filteredGL = filterAuditGL(glRows, audit);
-  const documents = buildAuditDocuments(pbDetails, filteredGL, audit);
+  const auditDocCodes: string[] = [];
+  const seen = new Set<string>();
+  for (const pi of piDocuments) {
+    const key = canonicalDocCode(pi.docCode);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    auditDocCodes.push(pi.docCode);
+  }
+  const filteredGL = filterAuditGL(glRows, auditDocCodes);
+  const documents = buildAuditDocuments(piDocuments, filteredGL);
   const postingAccounts = summarizePostingAccounts(filteredGL);
 
-  const grandDebit = sumTo2dp(documents.map((d) => d.debit));
-  const grandCredit = sumTo2dp(documents.map((d) => d.credit));
+  const grandDebit = round2(sumTo2dp(filteredGL.map((r) => safeNum(r.debitLocal))));
+  const grandCredit = round2(sumTo2dp(filteredGL.map((r) => safeNum(r.creditLocal))));
   const grandBalanced = Math.abs(grandDebit - grandCredit) < 0.011;
 
-  const incompleteReasons: string[] = [];
+  const docsWithoutGL = documents
+    .filter((d) => d.creditor === null && d.postings.length === 0)
+    .map((d) => d.docCode);
   const anyDocIncomplete = documents.some((d) => d.incomplete);
-  if (audit.length === 0)
-    incompleteReasons.push("No documents intersect between PurchaseBook and Purchase Invoice audit set.");
-  if (audit.length > 0 && filteredGL.length === 0)
-    incompleteReasons.push("No General Ledger rows were found for the intersected documents.");
-  if (anyDocIncomplete) incompleteReasons.push("One or more documents did not reconcile per-document.");
-  if (audit.length > 0 && filteredGL.length > 0 && !grandBalanced)
-    incompleteReasons.push("Grand Debit and Grand Credit do not balance.");
 
-  // Signed summary check — only meaningful when PB and PI doc sets are equal.
-  let summaryCheck: PurchaseAuditResult["summaryCheck"];
-  if (audit.length === 0 || filteredGL.length === 0) {
-    summaryCheck = {
-      kind: "skipped",
-      reason: "Nothing evaluated; signed posting-summary comparison skipped.",
-    };
-  } else if (!identical) {
-    summaryCheck = {
-      kind: "skipped",
-      reason:
-        pbOnly.length > 0
-          ? "PurchaseBook contains other purchase documents outside this app's Purchase Invoice audit set; signed posting-summary comparison skipped."
-          : "PurchaseBook and Purchase Invoice document sets differ; signed posting-summary comparison skipped.",
-    };
-  } else if (pbSummary.length === 0) {
-    summaryCheck = { kind: "mismatch", accounts: [] };
-    incompleteReasons.push("PurchaseBook postingSummary is empty; cannot verify signed convention.");
-  } else {
-    const glNetByAccount = new Map<string, number>();
-    for (const acc of postingAccounts) {
-      glNetByAccount.set(canonicalAccountCode(acc.accountCode), round2(acc.debit - acc.credit));
-    }
-    const check = (posIsDebit: boolean) => {
-      const mismatched: string[] = [];
-      for (const s of pbSummary) {
-        const raw = (s.accountCode ?? "").trim();
-        if (!raw) continue;
-        const key = canonicalAccountCode(raw);
-        const amt = safeNum(s.amount);
-        const signedAmt = posIsDebit ? amt : -amt;
-        const glNet = glNetByAccount.get(key) ?? 0;
-        if (Math.abs(round2(signedAmt - glNet)) > 0.011) mismatched.push(raw);
-      }
-      return mismatched;
-    };
-    const a = check(true);
-    const b = check(false);
-    if (a.length === 0) summaryCheck = { kind: "matched", convention: "positive-debit" };
-    else if (b.length === 0) summaryCheck = { kind: "matched", convention: "positive-credit" };
-    else {
-      summaryCheck = { kind: "mismatch", accounts: [...new Set([...a, ...b])].sort() };
-      incompleteReasons.push("PurchaseBook postingSummary does not reconcile to GL net amounts under either sign convention.");
-    }
+  const evaluated = filteredGL.length > 0;
+  const incompleteReasons: string[] = [];
+  if (docsWithoutGL.length > 0) {
+    incompleteReasons.push(
+      `${docsWithoutGL.length} Purchase Invoice${docsWithoutGL.length === 1 ? "" : "s"} have no matching GL postings.`,
+    );
+  }
+  if (evaluated && !grandBalanced) {
+    incompleteReasons.push("Grand Debit and Grand Credit do not balance.");
+  } else if (evaluated && anyDocIncomplete && docsWithoutGL.length === 0) {
+    incompleteReasons.push("One or more documents did not reconcile per-document.");
   }
 
-  const evaluated = audit.length > 0 && filteredGL.length > 0;
-  let balanceStatus: BalanceStatus;
-  if (!evaluated) balanceStatus = "not-evaluated";
-  else if (grandBalanced && !anyDocIncomplete) balanceStatus = "balanced";
-  else balanceStatus = "unbalanced";
+  const balanceStatus: BalanceStatus = !evaluated
+    ? "not-evaluated"
+    : grandBalanced && !anyDocIncomplete
+      ? "balanced"
+      : "unbalanced";
 
   return {
     documents,
@@ -349,8 +306,8 @@ export function reconcileAudit(
     balanceStatus,
     isComplete: incompleteReasons.length === 0 && evaluated,
     incompleteReasons,
-    summaryCheck,
-    auditDocCodes: audit,
+    auditDocCodes,
     glRowsUsed: filteredGL.length,
+    docsWithoutGL,
   };
 }

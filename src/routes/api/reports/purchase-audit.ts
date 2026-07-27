@@ -1,24 +1,25 @@
-// Phase 3B Views 1-2 accounting endpoint.
+// Phase 3B Correction C — Purchase Audit accounting endpoint.
 //
-// Correction A Task 1: the previous version called the undocumented
-//   POST /api/reporting/GeneralLedger
-// which returns HTTP 404. The correct N3 endpoint is:
-//   POST /api/reporting/GeneralLedger/QueryTransactionLines
-//     ?$top=500&$skip=<offset>
-// with body { accountCode, filter{...} } and envelope { data.count, data.value[] }.
+// Authoritative document set = the Purchase Invoice list produced by the
+// current GL Analysis inquiry (sent as `piDocuments`). PurchaseBook is not
+// consulted.
 //
-// GL fetches run behind a 3-worker pool. Within each account, pages are
-// requested serially until `skip >= count`. The bearer token is never echoed
-// back to the browser and upstream error messages are sanitized.
+// GL discovery:
+//   1. Enumerate every active GL account via
+//        POST /api/reporting/GeneralLedger/GetAccountRows
+//      with `filter.includeDACandCCAC: true`.
+//   2. For each account fetch every posting via
+//        POST /api/reporting/GeneralLedger/QueryTransactionLines
+//          ?$top=500&$skip=<offset>
+//      paginated by the `{ data: { count, value[] } }` envelope, again
+//      with `filter.includeDACandCCAC: true`.
+//   3. Keep only rows whose `docCode` matches one of the caller-supplied
+//      Purchase Invoice doc codes (canonical NFKC + trim + uppercase).
+//
+// Bearer tokens are never echoed and upstream error messages are sanitised.
+// Accounts fetch in a 3-worker pool; pages within an account are serial.
 
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  normalizePurchaseBook,
-  purchaseBookSupplierCode,
-  type PurchaseBookDetailItem,
-  type PurchaseBookNormalized,
-  type PurchaseBookPostingSummaryRow,
-} from "@/lib/purchase-book";
 import { canonicalAccountCode, canonicalDocCode } from "@/lib/report-keys";
 import type { GLRow } from "@/lib/audit-trail";
 
@@ -27,21 +28,38 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const GL_PAGE_SIZE = 500;
 const GL_WORKERS = 3;
 
+interface PIDocumentIn {
+  invoiceId?: string;
+  docCode: string;
+  docDate?: string;
+  dueDate?: string;
+  supplierCode?: string;
+  supplierName?: string;
+  termCode?: string;
+  termDescription?: string;
+  currencyCode?: string;
+  currencyRate?: number;
+}
+
+interface AuditRequest {
+  dateFrom: string;
+  dateTo: string;
+  piDocuments: PIDocumentIn[];
+}
+
 interface Reply {
   ok: boolean;
   kind?: "auth" | "validation" | "n3" | "incomplete" | "network";
   error?: string;
-  pb?: PurchaseBookNormalized;
   gl?: GLRow[];
   meta?: {
-    accountCodesTried: string[];
+    piDocumentCount: number;
+    accountsFetched: number;
+    accountsWithHits: number;
     accountsWithNoRows: string[];
-    pbDetailItems: number;
-    pbPostingSummary: number;
     glRowsFetched: number;
-    /** Up to three canonical PI/PB doc-code samples for authenticated diagnostics. */
+    glRowsMatched: number;
     piDocSample: string[];
-    pbDocSample: string[];
   };
 }
 
@@ -107,13 +125,6 @@ async function postJson(
   return { ok: true, status: res.status, parsed };
 }
 
-interface AuditRequest {
-  dateFrom: string;
-  dateTo: string;
-  /** Purchase Invoice audit doc-code set (from the current GL Analysis report). */
-  piDocCodes: string[];
-}
-
 function parseBody(raw: unknown): AuditRequest | { error: string } {
   if (!raw || typeof raw !== "object") return { error: "Missing body" };
   const b = raw as Record<string, unknown>;
@@ -122,56 +133,74 @@ function parseBody(raw: unknown): AuditRequest | { error: string } {
   if (!ISO_DATE_RE.test(dateFrom) || !ISO_DATE_RE.test(dateTo))
     return { error: "dateFrom / dateTo must be yyyy-mm-dd." };
   if (dateFrom > dateTo) return { error: "dateFrom must be on or before dateTo." };
-  const piRaw = Array.isArray(b.piDocCodes) ? b.piDocCodes : [];
-  const piDocCodes = piRaw
-    .map((v) => (typeof v === "string" ? v.trim() : ""))
-    .filter((v) => !!v);
-  return { dateFrom, dateTo, piDocCodes };
+  const rawList = Array.isArray(b.piDocuments) ? b.piDocuments : [];
+  const piDocuments: PIDocumentIn[] = [];
+  for (const r of rawList) {
+    if (!r || typeof r !== "object") continue;
+    const rec = r as Record<string, unknown>;
+    const dc = typeof rec.docCode === "string" ? rec.docCode.trim() : "";
+    if (!dc) continue;
+    piDocuments.push({
+      invoiceId: typeof rec.invoiceId === "string" ? rec.invoiceId : undefined,
+      docCode: dc,
+      docDate: typeof rec.docDate === "string" ? rec.docDate : undefined,
+      dueDate: typeof rec.dueDate === "string" ? rec.dueDate : undefined,
+      supplierCode: typeof rec.supplierCode === "string" ? rec.supplierCode : undefined,
+      supplierName: typeof rec.supplierName === "string" ? rec.supplierName : undefined,
+      termCode: typeof rec.termCode === "string" ? rec.termCode : undefined,
+      termDescription:
+        typeof rec.termDescription === "string" ? rec.termDescription : undefined,
+      currencyCode: typeof rec.currencyCode === "string" ? rec.currencyCode : undefined,
+      currencyRate: typeof rec.currencyRate === "number" ? rec.currencyRate : undefined,
+    });
+  }
+  if (piDocuments.length === 0)
+    return { error: "piDocuments must contain at least one Purchase Invoice." };
+  return { dateFrom, dateTo, piDocuments };
 }
 
-async function fetchPurchaseBook(
+async function fetchAccountRows(
   base: string,
   token: string,
   req: AuditRequest,
-): Promise<{ ok: true; pb: PurchaseBookNormalized } | { ok: false; message: string }> {
-  const payload = {
+): Promise<{ ok: true; accounts: string[] } | { ok: false; message: string }> {
+  const url = `${base}/api/reporting/GeneralLedger/GetAccountRows`;
+  const body = {
     filter: {
       dateFrom: `${req.dateFrom}T00:00:00`,
       dateTo: `${req.dateTo}T23:59:59`,
-      supplierFrom: null,
-      supplierTo: null,
-      purchaserFrom: null,
-      purchaserTo: null,
-      docPurchaserFrom: null,
-      docPurchaserTo: null,
-      areaFrom: null,
-      areaTo: null,
-      categoryFrom: null,
-      categoryTo: null,
-      exDoc: false,
+      accountFrom: null,
+      accountTo: null,
+      accountCodes: null,
       build: null,
       projectIds: [] as number[],
       projOption: -2,
+      sortBy: null,
+      includeZero: true,
+      includeDACandCCAC: true,
     },
-    options: null,
   };
-  const res = await postJson(`${base}/api/reporting/PurchaseBook`, token, payload);
-  if (!res.ok) return { ok: false, message: res.message };
-  const normalized = normalizePurchaseBook(res.parsed);
-  if (normalized.kind !== "ok") {
-    return {
-      ok: false,
-      message: `PurchaseBook contract mismatch (${normalized.reason} — ${normalized.shape})`,
-    };
+  const res = await postJson(url, token, body);
+  if (!res.ok) return { ok: false, message: `HTTP ${res.status} — ${res.message}` };
+  const parsed = res.parsed as { data?: unknown } | null;
+  const data = parsed && typeof parsed === "object" ? parsed.data : null;
+  const rows: unknown[] = Array.isArray(data)
+    ? data
+    : data && typeof data === "object" && Array.isArray((data as { value?: unknown[] }).value)
+      ? ((data as { value: unknown[] }).value)
+      : [];
+  const seen = new Map<string, string>();
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    const rec = r as { accountCode?: unknown };
+    const code = typeof rec.accountCode === "string" ? rec.accountCode.trim() : "";
+    if (!code) continue;
+    const key = canonicalAccountCode(code);
+    if (!seen.has(key)) seen.set(key, code);
   }
-  return { ok: true, pb: normalized };
+  return { ok: true, accounts: [...seen.values()].sort((a, b) => a.localeCompare(b)) };
 }
 
-/**
- * Fetch every GL transaction line for a single account code, paging through
- * the documented `{ count, value[] }` envelope at 500 rows per request.
- * Account codes (e.g. `800-C001`) are opaque strings — never numeric IDs.
- */
 async function fetchGLForAccount(
   base: string,
   token: string,
@@ -180,7 +209,6 @@ async function fetchGLForAccount(
 ): Promise<{ ok: true; rows: GLRow[] } | { ok: false; message: string }> {
   const rows: GLRow[] = [];
   let skip = 0;
-  // Hard safety cap: 500 pages * 500 rows = 250k lines per account.
   for (let page = 0; page < 500; page++) {
     const url =
       `${base}/api/reporting/GeneralLedger/QueryTransactionLines` +
@@ -198,7 +226,7 @@ async function fetchGLForAccount(
         projOption: -2,
         sortBy: null,
         includeZero: false,
-        includeDACandCCAC: false,
+        includeDACandCCAC: true,
       },
     };
     const res = await postJson(url, token, body);
@@ -223,30 +251,6 @@ async function fetchGLForAccount(
   return { ok: true, rows };
 }
 
-/**
- * Candidate account codes for GL fetch = every posting-summary accountCode
- * PLUS every PurchaseBook supplier/creditor code (documented `code`, with
- * `supplierCode` as backward-compatible fallback). Deduplicated using the
- * shared canonical account-key rule, keeping the first original casing for
- * the upstream query.
- */
-function candidateAccountCodes(
-  detailItems: PurchaseBookDetailItem[],
-  postingSummary: PurchaseBookPostingSummaryRow[],
-): string[] {
-  const seen = new Map<string, string>();
-  const add = (raw: string) => {
-    const trimmed = raw.trim();
-    if (!trimmed) return;
-    const key = canonicalAccountCode(trimmed);
-    if (!seen.has(key)) seen.set(key, trimmed);
-  };
-  for (const s of postingSummary) add(typeof s.accountCode === "string" ? s.accountCode : "");
-  for (const d of detailItems) add(purchaseBookSupplierCode(d));
-  return [...seen.values()].sort((a, b) => a.localeCompare(b));
-}
-
-/** Simple pool: at most `limit` workers concurrent over `items`. */
 async function pool<T, R>(
   items: T[],
   limit: number,
@@ -261,7 +265,10 @@ async function pool<T, R>(
       out[i] = await worker(items[i], i);
     }
   };
-  const runners = Array.from({ length: Math.max(1, Math.min(limit | 0, items.length)) }, run);
+  const runners = Array.from(
+    { length: Math.max(1, Math.min(limit | 0, items.length)) },
+    run,
+  );
   await Promise.all(runners);
   return out;
 }
@@ -286,17 +293,23 @@ async function handle(request: Request): Promise<Response> {
 
   const reportingBase = process.env.OPEN_API_REPORTING_BASE_URL || REPORTING_DEFAULT;
 
-  const pbResult = await fetchPurchaseBook(reportingBase, token, req);
-  if (!pbResult.ok)
-    return jsonRes(502, { ok: false, kind: "incomplete", error: pbResult.message });
-  const pb = pbResult.pb;
+  // 1. Discover every active GL account for the period.
+  const accountsRes = await fetchAccountRows(reportingBase, token, req);
+  if (!accountsRes.ok)
+    return jsonRes(502, {
+      ok: false,
+      kind: "incomplete",
+      error: `Could not enumerate GL accounts: ${accountsRes.message}`,
+    });
+  const accounts = accountsRes.accounts;
 
-  const codes = candidateAccountCodes(pb.detailItems, pb.postingSummary);
-  const perAccount = await pool(codes, GL_WORKERS, (code) =>
+  // 2. Fetch every posting for every discovered account.
+  const perAccount = await pool(accounts, GL_WORKERS, (code) =>
     fetchGLForAccount(reportingBase, token, req, code).then((r) => ({ code, r })),
   );
-  const gl: GLRow[] = [];
+  const glAll: GLRow[] = [];
   const emptyAccounts: string[] = [];
+  let accountsWithHits = 0;
   for (const { code, r } of perAccount) {
     if (!r.ok) {
       return jsonRes(502, {
@@ -306,33 +319,31 @@ async function handle(request: Request): Promise<Response> {
       });
     }
     if (r.rows.length === 0) emptyAccounts.push(code);
-    else gl.push(...r.rows);
+    else {
+      accountsWithHits += 1;
+      glAll.push(...r.rows);
+    }
   }
 
+  // 3. Filter to the caller-supplied Purchase Invoice document set.
+  const wanted = new Set(req.piDocuments.map((p) => canonicalDocCode(p.docCode)));
+  const glMatched = glAll.filter((r) => wanted.has(canonicalDocCode(r.docCode)));
+
   const piDocSample = [
-    ...new Set(req.piDocCodes.map(canonicalDocCode).filter(Boolean)),
-  ].slice(0, 3);
-  const pbDocSample = [
-    ...new Set(
-      pb.detailItems
-        .filter((d) => !d.isCancelled)
-        .map((d) => canonicalDocCode(d.docCode))
-        .filter(Boolean),
-    ),
+    ...new Set(req.piDocuments.map((p) => canonicalDocCode(p.docCode)).filter(Boolean)),
   ].slice(0, 3);
 
   return jsonRes(200, {
     ok: true,
-    pb,
-    gl,
+    gl: glMatched,
     meta: {
-      accountCodesTried: codes,
+      piDocumentCount: req.piDocuments.length,
+      accountsFetched: accounts.length,
+      accountsWithHits,
       accountsWithNoRows: emptyAccounts,
-      pbDetailItems: pb.detailItems.length,
-      pbPostingSummary: pb.postingSummary.length,
-      glRowsFetched: gl.length,
+      glRowsFetched: glAll.length,
+      glRowsMatched: glMatched.length,
       piDocSample,
-      pbDocSample,
     },
   });
 }

@@ -38,11 +38,11 @@ import { loadReportSnapshot, reportCacheKey } from "@/lib/report-cache";
 import {
   reconcileAudit,
   type AuditDocument,
+  type AuditPIDocument,
   type GLRow,
   type PostingAccountRow,
   type PurchaseAuditResult,
 } from "@/lib/audit-trail";
-import type { PurchaseBookNormalized } from "@/lib/purchase-book";
 import { canonicalDocCode } from "@/lib/report-keys";
 
 // ----- Route --------------------------------------------------------------
@@ -130,20 +130,22 @@ interface AuditFetchReply {
   ok: boolean;
   kind?: string;
   error?: string;
-  pb?: PurchaseBookNormalized;
   gl?: GLRow[];
   meta?: {
-    accountCodesTried: string[];
+    piDocumentCount: number;
+    accountsFetched: number;
+    accountsWithHits: number;
     accountsWithNoRows: string[];
-    pbDetailItems: number;
-    pbPostingSummary: number;
     glRowsFetched: number;
-    piDocSample?: string[];
-    pbDocSample?: string[];
+    glRowsMatched: number;
+    piDocSample: string[];
   };
 }
 
-async function fetchAudit(filter: ReportCriteria, piDocCodes: string[]): Promise<AuditFetchReply> {
+async function fetchAudit(
+  filter: ReportCriteria,
+  piDocuments: AuditPIDocument[],
+): Promise<AuditFetchReply> {
   const token = getToken();
   if (!token) throw new Error("Not signed in to N3.");
   const res = await fetch("/api/reports/purchase-audit", {
@@ -156,7 +158,7 @@ async function fetchAudit(filter: ReportCriteria, piDocCodes: string[]): Promise
     body: JSON.stringify({
       dateFrom: filter.dateFrom,
       dateTo: filter.dateTo,
-      piDocCodes,
+      piDocuments,
     }),
   });
   const text = await res.text();
@@ -250,14 +252,32 @@ function PurchaseReportPage() {
     return mutated ? { ...rawCached, lines } : rawCached;
   }, [rawCached, tariffMap]);
 
-  const piDocCodes = useMemo(() => {
-    if (!cached) return [] as string[];
-    return [...new Set(cached.lines.map((l) => l.invoiceId ? l.docCode : "").filter(Boolean))];
+  // Correction C: Purchase Audit reads the current GL Analysis inquiry as
+  // its authoritative document set. One AuditPIDocument per Purchase
+  // Invoice, deduplicated by canonical docCode. Term/currency default to
+  // display-only values when not surfaced through GLDrillDownLine.
+  const piDocuments = useMemo<AuditPIDocument[]>(() => {
+    if (!cached) return [];
+    const seen = new Map<string, AuditPIDocument>();
+    for (const l of cached.lines) {
+      if (!l.docCode) continue;
+      const key = canonicalDocCode(l.docCode);
+      if (!key || seen.has(key)) continue;
+      seen.set(key, {
+        invoiceId: l.invoiceId,
+        docCode: l.docCode,
+        docDate: l.docDate,
+        supplierCode: l.supplierCode,
+        supplierName: l.supplierName,
+        termDescription: l.paymentType,
+      });
+    }
+    return [...seen.values()];
   }, [cached]);
 
   // Canonical doc-code -> immutable N3 invoice id, built once from the
-  // current GL Analysis report. Task 5: Audit Trail PI numbers use this map
-  // to link into /purchase-invoices/{invoiceId}/edit without an extra fetch.
+  // current GL Analysis report. Audit Trail PI numbers use this map to
+  // link into /purchase-invoices/{invoiceId}/edit without an extra fetch.
   const docCodeToInvoiceId = useMemo(() => {
     const m = new Map<string, string>();
     if (!cached) return m;
@@ -273,18 +293,18 @@ function PurchaseReportPage() {
   const isAccountingView = viewId === "audit-trail" || viewId === "posting-account";
 
   const auditQ = useQuery<AuditFetchReply, Error>({
-    queryKey: ["purchase-audit", inquiry?.filter, piDocCodes],
-    enabled: hydrated && !!token && !!cached && isAccountingView && piDocCodes.length > 0,
-    queryFn: () => fetchAudit(inquiry!.filter, piDocCodes),
+    queryKey: ["purchase-audit", inquiry?.filter, piDocuments.length],
+    enabled: hydrated && !!token && !!cached && isAccountingView && piDocuments.length > 0,
+    queryFn: () => fetchAudit(inquiry!.filter, piDocuments),
     staleTime: 5 * 60_000,
     retry: false,
   });
 
   const auditResult: PurchaseAuditResult | null = useMemo(() => {
     const data = auditQ.data;
-    if (!data?.ok || !data.pb || !data.gl) return null;
-    return reconcileAudit(data.pb.detailItems, data.pb.postingSummary, data.gl, piDocCodes);
-  }, [auditQ.data, piDocCodes]);
+    if (!data?.ok || !data.gl) return null;
+    return reconcileAudit(piDocuments, data.gl);
+  }, [auditQ.data, piDocuments]);
 
   // Header
   return (
@@ -646,9 +666,9 @@ function AuditTrailView({
   if (loading)
     return (
       <div className="app-card p-6 text-sm text-muted-foreground">
-        <div>Fetching PurchaseBook…</div>
-        <div>Fetching General Ledger transactions per posting account…</div>
-        <div>Reconciling…</div>
+        <div>Enumerating active GL accounts…</div>
+        <div>Fetching General Ledger transactions per account…</div>
+        <div>Reconciling against the current Purchase Invoice set…</div>
       </div>
     );
   if (error)
@@ -767,30 +787,28 @@ function AuditReconcileHeader({
   return (
     <div className="app-card p-3 text-[12px]">
       <div className="grid gap-2 md:grid-cols-4">
-        <MiniStat label="PB detail items" value={String(data.meta?.pbDetailItems ?? 0)} />
-        <MiniStat label="PB posting rows" value={String(data.meta?.pbPostingSummary ?? 0)} />
-        <MiniStat label="GL rows in audit set" value={String(result.glRowsUsed)} />
-        <MiniStat label="Documents reconciled" value={String(result.documents.length)} />
+        <MiniStat label="Target PIs" value={String(data.meta?.piDocumentCount ?? 0)} />
+        <MiniStat
+          label="Active GL accounts scanned"
+          value={String(data.meta?.accountsFetched ?? 0)}
+        />
+        <MiniStat label="GL rows matched" value={String(result.glRowsUsed)} />
+        <MiniStat
+          label="Documents reconciled"
+          value={String(result.documents.length)}
+        />
       </div>
-      <div className="mt-2">
-        {result.summaryCheck.kind === "matched" && (
-          <span className="text-success">
-            PB posting summary reconciles (convention: {result.summaryCheck.convention}).
+      {result.docsWithoutGL.length > 0 && (
+        <div className="mt-2 text-destructive">
+          {result.docsWithoutGL.length} Purchase Invoice
+          {result.docsWithoutGL.length === 1 ? "" : "s"} had no matching GL
+          postings:{" "}
+          <span className="tabular">
+            {result.docsWithoutGL.slice(0, 6).join(", ")}
+            {result.docsWithoutGL.length > 6 ? "…" : ""}
           </span>
-        )}
-        {result.summaryCheck.kind === "skipped" && (
-          <span className="text-muted-foreground">{result.summaryCheck.reason}</span>
-        )}
-        {result.summaryCheck.kind === "mismatch" && (
-          <span className="text-destructive">
-            PB posting summary does NOT reconcile with GL
-            {result.summaryCheck.accounts.length > 0
-              ? ` (accounts: ${result.summaryCheck.accounts.join(", ")})`
-              : ""}
-            .
-          </span>
-        )}
-      </div>
+        </div>
+      )}
       {result.incompleteReasons.length > 0 && (
         <ul className="mt-2 list-disc pl-5 text-destructive">
           {result.incompleteReasons.map((r) => (
@@ -838,7 +856,7 @@ function PostingAccountView({
       <AuditReconcileHeader result={result} data={data} />
       {notEvaluated && (
         <div className="app-card border-l-4 border-l-destructive p-3 text-sm">
-          Posting Account Summary was not evaluated: no intersecting documents or GL rows.
+          Posting Account Summary was not evaluated: no GL rows matched the current Purchase Invoice set.
         </div>
       )}
       <div className="app-card overflow-x-auto p-3">
