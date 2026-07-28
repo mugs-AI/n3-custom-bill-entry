@@ -705,6 +705,7 @@ function AuditTrailView({
   data,
   result,
   docCodeToInvoiceId,
+  piCount,
   onRetry,
 }: {
   loading: boolean;
@@ -712,14 +713,14 @@ function AuditTrailView({
   data: AuditFetchReply | null;
   result: PurchaseAuditResult | null;
   docCodeToInvoiceId: Map<string, string>;
+  piCount: number;
   onRetry: () => void;
 }) {
   if (loading)
     return (
       <div className="app-card p-6 text-sm text-muted-foreground">
-        <div>Enumerating active GL accounts…</div>
-        <div>Fetching General Ledger transactions per account…</div>
-        <div>Reconciling against the current Purchase Invoice set…</div>
+        Loading Account Journals for {piCount} Purchase Invoice
+        {piCount === 1 ? "" : "s"}…
       </div>
     );
   if (error)
@@ -730,6 +731,7 @@ function AuditTrailView({
         onRetry={onRetry}
       />
     );
+
   if (!data || !result) return null;
   return (
     <div className="space-y-3">
