@@ -45,7 +45,6 @@ import {
 } from "@/lib/audit-trail";
 import { canonicalDocCode } from "@/lib/report-keys";
 import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
-import { getAuthScope } from "@/lib/draft-store";
 
 
 // ----- Route --------------------------------------------------------------
