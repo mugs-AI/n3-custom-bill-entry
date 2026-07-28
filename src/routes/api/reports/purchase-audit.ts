@@ -1,29 +1,26 @@
-// Phase 3B Correction D — Purchase Audit accounting endpoint.
+// Phase 3B Correction E — Purchase Audit accounting endpoint.
 //
-// Document set = the Purchase Invoice list produced by the current GL
-// Analysis inquiry (sent as `piDocuments`, now including `supplierInvNo`).
+// Primary strategy (per Correction E §3): for every target Purchase Invoice
+// we call the document-level Account Journal endpoint
+//   GET /api/PurchaseInvoices/GLPosting?key=<invoiceId>
+// with a bounded worker pool (max 6). Each response is normalized against
+// its own target PI (see `pi-gl-posting.ts`) with stateful continuation-row
+// account inheritance so blank-account credits (e.g. `167.44`, `95.68`)
+// remain part of the same document under the correct supplier-control
+// account. All PIs must succeed; a partial result is never returned.
 //
-// GL discovery:
-//   1. Enumerate active GL accounts via
-//        POST /api/reporting/GeneralLedger/GetAccountRows
-//      sending the GeneralLedgerFilter DIRECTLY (no `filter` wrapper),
-//      with `includeZero=false, includeDACandCCAC=true`. A successful
-//      envelope missing an account array is treated as a contract error.
-//   2. Union those accounts with every target PI `supplierCode` — supplier
-//      control accounts always ship, even when GetAccountRows omits them.
-//   3. For each account, fetch every posting via
-//        POST /api/reporting/GeneralLedger/QueryTransactionLines
-//          ?$top=500&$skip=<offset>
-//      with the documented `{ accountCode, filter }` wrapper.
-//   4. Continuation/split rows can omit repeated accountCode/accountName/
-//      docCode fields; normalizeAccountRows restores account context and
-//      resolves blank docCodes to a unique target PI by
-//      (supplierInvNo, docDate, [supplierCode]). Ambiguous fallbacks are
-//      surfaced as unresolved rows so the audit fails incomplete rather
-//      than silently balancing.
+// Fallback strategy (Correction E §4): only if the primary path cannot
+// complete the whole target set — because GLPosting is not available for
+// this tenant/version (404/405), returns an unsupported successful shape,
+// or produces no usable journal for a document — we fall back to the older
+// General Ledger scan. The fallback iterates each account's rows statefully
+// (blank-account continuation rows inherit the last explicit account, not
+// the supplier code) and resolves blank-docCode rows by canonical
+// (supplierInvNo, docDate?, supplierCode?) with blank date tolerated when
+// Supplier INV# is unique.
 //
-// Bearer tokens are never echoed and upstream error messages are sanitised.
-// Accounts fetch in a 3-worker pool; pages within an account are serial.
+// Primary and fallback results are never mixed: if primary is partial it is
+// discarded and one full fallback pass is executed.
 
 import { createFileRoute } from "@tanstack/react-router";
 import type { AuditPIDocument, GLRow } from "@/lib/audit-trail";
@@ -35,12 +32,15 @@ import {
   type AccountToQuery,
   type UnresolvedRow,
 } from "@/lib/audit-server";
+import { normalizeGLPostingForPI } from "@/lib/pi-gl-posting";
 import { canonicalDocCode } from "@/lib/report-keys";
 
 const REPORTING_DEFAULT = "https://openapi-reporting.account.qne.cloud";
+const MAIN_DEFAULT = "https://openapi.account.qne.cloud";
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const GL_PAGE_SIZE = 500;
 const GL_WORKERS = 3;
+const PI_GLPOSTING_WORKERS = 6;
 
 interface PIDocumentIn extends AuditPIDocument {}
 
@@ -50,24 +50,35 @@ interface AuditRequest {
   piDocuments: PIDocumentIn[];
 }
 
+type Strategy = "purchase-invoice-glposting" | "general-ledger-fallback";
+
+interface Meta {
+  strategy: Strategy;
+  targetInvoiceCount: number;
+  upstreamRequestCount: number;
+  rowsMatched: number;
+  elapsedMs: number;
+  fallbackReason?: string;
+  piDocumentCount: number;
+  piDocSample: string[];
+  // Fallback-only diagnostics (retained for the older UI).
+  accountsFetched?: number;
+  accountsFromApi?: number;
+  accountsFromSuppliers?: number;
+  accountsWithHits?: number;
+  accountsWithNoRows?: string[];
+  glRowsFetched?: number;
+  glRowsMatched?: number;
+  unresolvedCount?: number;
+  unresolvedRows?: UnresolvedRow[];
+}
+
 interface Reply {
   ok: boolean;
   kind?: "auth" | "validation" | "n3" | "incomplete" | "network";
   error?: string;
   gl?: GLRow[];
-  meta?: {
-    piDocumentCount: number;
-    accountsFetched: number;
-    accountsFromApi: number;
-    accountsFromSuppliers: number;
-    accountsWithHits: number;
-    accountsWithNoRows: string[];
-    glRowsFetched: number;
-    glRowsMatched: number;
-    piDocSample: string[];
-    unresolvedCount?: number;
-    unresolvedRows?: UnresolvedRow[];
-  };
+  meta?: Meta;
 }
 
 function jsonRes(status: number, body: Reply): Response {
@@ -86,14 +97,18 @@ function safeMessage(raw: string, fallback: string): string {
   return scrubbed.length > 240 ? `${scrubbed.slice(0, 240)}…` : scrubbed;
 }
 
-async function postJson(
-  url: string,
-  token: string,
-  body: unknown,
-): Promise<
-  | { ok: true; status: number; parsed: unknown }
-  | { ok: false; status: number; message: string }
-> {
+interface HttpOk {
+  ok: true;
+  status: number;
+  parsed: unknown;
+}
+interface HttpErr {
+  ok: false;
+  status: number;
+  message: string;
+}
+
+async function postJson(url: string, token: string, body: unknown): Promise<HttpOk | HttpErr> {
   let res: Response;
   try {
     res = await fetch(url, {
@@ -104,6 +119,43 @@ async function postJson(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      status: 0,
+      message: safeMessage(err instanceof Error ? err.message : "", "Network error"),
+    };
+  }
+  const text = await res.text();
+  let parsed: unknown = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    if (!res.ok)
+      return { ok: false, status: res.status, message: `Upstream HTTP ${res.status} (non-JSON)` };
+  }
+  if (!res.ok) {
+    const msg = safeMessage(
+      parsed && typeof parsed === "object" && "message" in (parsed as object)
+        ? String((parsed as { message?: unknown }).message ?? "")
+        : "",
+      `Upstream HTTP ${res.status}`,
+    );
+    return { ok: false, status: res.status, message: msg };
+  }
+  return { ok: true, status: res.status, parsed };
+}
+
+async function getJson(url: string, token: string): Promise<HttpOk | HttpErr> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
     });
   } catch (err) {
     return {
@@ -167,6 +219,107 @@ function parseBody(raw: unknown): AuditRequest | { error: string } {
   return { dateFrom, dateTo, piDocuments };
 }
 
+async function pool<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+  const run = async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      out[i] = await worker(items[i], i);
+    }
+  };
+  const runners = Array.from(
+    { length: Math.max(1, Math.min(limit | 0, items.length)) },
+    run,
+  );
+  await Promise.all(runners);
+  return out;
+}
+
+// ---------- Primary strategy: PI GLPosting -------------------------------
+
+interface PrimaryOk {
+  ok: true;
+  rows: GLRow[];
+  upstreamRequestCount: number;
+}
+interface PrimaryFail {
+  ok: false;
+  reason: string;
+  upstreamRequestCount: number;
+}
+
+async function runPrimaryGLPosting(
+  mainBase: string,
+  token: string,
+  req: AuditRequest,
+): Promise<PrimaryOk | PrimaryFail> {
+  // §3.2: every target PI must carry an immutable invoice id, else we cannot
+  // hit the document-level endpoint at all → fall back.
+  const missingId = req.piDocuments.find((p) => !p.invoiceId);
+  if (missingId) {
+    return {
+      ok: false,
+      reason: `Purchase Invoice ${missingId.docCode} has no N3 invoice id in the current GL Analysis cache.`,
+      upstreamRequestCount: 0,
+    };
+  }
+
+  let upstreamRequestCount = 0;
+  const results = await pool(req.piDocuments, PI_GLPOSTING_WORKERS, async (pi) => {
+    upstreamRequestCount += 1;
+    const url = `${mainBase}/api/PurchaseInvoices/GLPosting?key=${encodeURIComponent(pi.invoiceId!)}`;
+    const res = await getJson(url, token);
+    return { pi, res };
+  });
+
+  const allRows: GLRow[] = [];
+  for (const { pi, res } of results) {
+    if (!res.ok) {
+      // 404/405: endpoint not available for this tenant/version → fallback.
+      if (res.status === 404 || res.status === 405) {
+        return {
+          ok: false,
+          reason: `GLPosting endpoint not available for this tenant/version (HTTP ${res.status}).`,
+          upstreamRequestCount,
+        };
+      }
+      // Auth surfaces to caller as-is; other failures also drop to fallback
+      // rather than fabricating a partial result.
+      if (res.status === 401) {
+        return {
+          ok: false,
+          reason: `GLPosting request rejected (HTTP 401 ${safeMessage(res.message, "auth")}).`,
+          upstreamRequestCount,
+        };
+      }
+      return {
+        ok: false,
+        reason: `GLPosting request failed for ${pi.docCode} (HTTP ${res.status} — ${res.message}).`,
+        upstreamRequestCount,
+      };
+    }
+    const norm = normalizeGLPostingForPI(res.parsed, pi);
+    if (!norm.ok) {
+      return {
+        ok: false,
+        reason: `GLPosting response for ${pi.docCode} was ${norm.reason}.`,
+        upstreamRequestCount,
+      };
+    }
+    allRows.push(...norm.rows);
+  }
+
+  return { ok: true, rows: allRows, upstreamRequestCount };
+}
+
+// ---------- Fallback strategy: broad GL scan -----------------------------
+
 async function fetchAccountRows(
   base: string,
   token: string,
@@ -183,7 +336,11 @@ async function fetchAccountRows(
   const data = parsed && typeof parsed === "object" ? parsed.data : undefined;
   let rows: unknown[] | null = null;
   if (Array.isArray(data)) rows = data;
-  else if (data && typeof data === "object" && Array.isArray((data as { value?: unknown[] }).value))
+  else if (
+    data &&
+    typeof data === "object" &&
+    Array.isArray((data as { value?: unknown[] }).value)
+  )
     rows = (data as { value: unknown[] }).value;
   if (!rows) {
     return {
@@ -239,29 +396,98 @@ async function fetchGLForAccount(
   return { ok: true, rows };
 }
 
-async function pool<T, R>(
-  items: T[],
-  limit: number,
-  worker: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let cursor = 0;
-  const run = async () => {
-    while (true) {
-      const i = cursor++;
-      if (i >= items.length) return;
-      out[i] = await worker(items[i], i);
-    }
-  };
-  const runners = Array.from(
-    { length: Math.max(1, Math.min(limit | 0, items.length)) },
-    run,
-  );
-  await Promise.all(runners);
-  return out;
+interface FallbackOut {
+  gl: GLRow[];
+  meta: Partial<Meta>;
+  upstreamRequestCount: number;
+  error?: { status: number; kind: Reply["kind"]; message: string };
+  unresolved: UnresolvedRow[];
 }
 
+async function runFallbackGeneralLedger(
+  reportingBase: string,
+  token: string,
+  req: AuditRequest,
+): Promise<FallbackOut> {
+  let upstreamRequestCount = 0;
+  const accountsRes = await fetchAccountRows(reportingBase, token, req);
+  upstreamRequestCount += 1;
+  if (!accountsRes.ok) {
+    return {
+      gl: [],
+      meta: {},
+      upstreamRequestCount,
+      unresolved: [],
+      error: {
+        status: 502,
+        kind: "incomplete",
+        message: `Could not enumerate GL accounts: ${accountsRes.message}`,
+      },
+    };
+  }
+
+  const queries: AccountToQuery[] = unionAccountQueries(
+    accountsRes.accounts,
+    req.piDocuments,
+  );
+  const accountsFromSuppliers = queries.filter((q) => q.source === "target-supplier").length;
+
+  const perAccount = await pool(queries, GL_WORKERS, (q) =>
+    fetchGLForAccount(reportingBase, token, req, q.accountCode).then((r) => {
+      upstreamRequestCount += 1;
+      return { q, r };
+    }),
+  );
+
+  const glMatched: GLRow[] = [];
+  const emptyAccounts: string[] = [];
+  const unresolved: UnresolvedRow[] = [];
+  let accountsWithHits = 0;
+  let glRowsFetched = 0;
+  for (const { q, r } of perAccount) {
+    if (!r.ok) {
+      return {
+        gl: [],
+        meta: {},
+        upstreamRequestCount,
+        unresolved: [],
+        error: {
+          status: 502,
+          kind: "incomplete",
+          message: `Could not fetch GL rows for account ${q.accountCode}: ${r.message}`,
+        },
+      };
+    }
+    glRowsFetched += r.rows.length;
+    const norm = normalizeAccountRows(q, r.rows, req.piDocuments);
+    if (norm.rows.length === 0) emptyAccounts.push(q.accountCode);
+    else {
+      accountsWithHits += 1;
+      glMatched.push(...norm.rows);
+    }
+    if (norm.unresolved.length > 0) unresolved.push(...norm.unresolved);
+  }
+
+  return {
+    gl: glMatched,
+    upstreamRequestCount,
+    unresolved,
+    meta: {
+      accountsFetched: queries.length,
+      accountsFromApi: queries.length - accountsFromSuppliers,
+      accountsFromSuppliers,
+      accountsWithHits,
+      accountsWithNoRows: emptyAccounts,
+      glRowsFetched,
+      glRowsMatched: glMatched.length,
+    },
+  };
+}
+
+// ---------- Route handler ------------------------------------------------
+
 async function handle(request: Request): Promise<Response> {
+  const startedAt = Date.now();
   const authz = request.headers.get("authorization") ?? "";
   const m = authz.match(/^Bearer\s+(.+)$/i);
   if (!m || !m[1].trim())
@@ -280,85 +506,76 @@ async function handle(request: Request): Promise<Response> {
   const req = parsed;
 
   const reportingBase = process.env.OPEN_API_REPORTING_BASE_URL || REPORTING_DEFAULT;
-
-  // 1. Discover every active GL account for the period.
-  const accountsRes = await fetchAccountRows(reportingBase, token, req);
-  if (!accountsRes.ok)
-    return jsonRes(502, {
-      ok: false,
-      kind: "incomplete",
-      error: `Could not enumerate GL accounts: ${accountsRes.message}`,
-    });
-
-  // 2. Union with every target PI supplier code so control accounts always ship.
-  const queries: AccountToQuery[] = unionAccountQueries(
-    accountsRes.accounts,
-    req.piDocuments,
-  );
-  const accountsFromSuppliers = queries.filter((q) => q.source === "target-supplier").length;
-
-  // 3. Fetch every posting for every account in the union.
-  const perAccount = await pool(queries, GL_WORKERS, (q) =>
-    fetchGLForAccount(reportingBase, token, req, q.accountCode).then((r) => ({ q, r })),
-  );
-
-  const glMatched: GLRow[] = [];
-  const emptyAccounts: string[] = [];
-  const unresolved: UnresolvedRow[] = [];
-  let accountsWithHits = 0;
-  let glRowsFetched = 0;
-  for (const { q, r } of perAccount) {
-    if (!r.ok) {
-      return jsonRes(502, {
-        ok: false,
-        kind: "incomplete",
-        error: `Could not fetch GL rows for account ${q.accountCode}: ${r.message}`,
-      });
-    }
-    glRowsFetched += r.rows.length;
-    const norm = normalizeAccountRows(q, r.rows, req.piDocuments);
-    if (norm.rows.length === 0) emptyAccounts.push(q.accountCode);
-    else {
-      accountsWithHits += 1;
-      glMatched.push(...norm.rows);
-    }
-    if (norm.unresolved.length > 0) unresolved.push(...norm.unresolved);
-  }
+  const mainBase = process.env.OPEN_API_BASE_URL || MAIN_DEFAULT;
 
   const piDocSample = [
     ...new Set(req.piDocuments.map((p) => canonicalDocCode(p.docCode)).filter(Boolean)),
   ].slice(0, 3);
 
-  const baseMeta = {
-    piDocumentCount: req.piDocuments.length,
-    accountsFetched: queries.length,
-    accountsFromApi: queries.length - accountsFromSuppliers,
-    accountsFromSuppliers,
-    accountsWithHits,
-    accountsWithNoRows: emptyAccounts,
-    glRowsFetched,
-    glRowsMatched: glMatched.length,
-    piDocSample,
-  };
+  // ----- Primary path -----
+  const primary = await runPrimaryGLPosting(mainBase, token, req);
+  if (primary.ok) {
+    const meta: Meta = {
+      strategy: "purchase-invoice-glposting",
+      targetInvoiceCount: req.piDocuments.length,
+      upstreamRequestCount: primary.upstreamRequestCount,
+      rowsMatched: primary.rows.length,
+      elapsedMs: Date.now() - startedAt,
+      piDocumentCount: req.piDocuments.length,
+      piDocSample,
+    };
+    return jsonRes(200, { ok: true, gl: primary.rows, meta });
+  }
 
-  if (unresolved.length > 0) {
-    return jsonRes(200, {
+  // ----- Fallback path (only when primary cannot complete) -----
+  const fallbackReason = primary.reason;
+  const fb = await runFallbackGeneralLedger(reportingBase, token, req);
+  const totalUpstream = primary.upstreamRequestCount + fb.upstreamRequestCount;
+  if (fb.error) {
+    return jsonRes(fb.error.status, {
       ok: false,
-      kind: "incomplete",
-      error: `Unable to uniquely resolve ${unresolved.length} General Ledger row${unresolved.length === 1 ? "" : "s"} to a target Purchase Invoice.`,
+      kind: fb.error.kind,
+      error: fb.error.message,
       meta: {
-        ...baseMeta,
-        unresolvedCount: unresolved.length,
-        unresolvedRows: unresolved,
+        strategy: "general-ledger-fallback",
+        targetInvoiceCount: req.piDocuments.length,
+        upstreamRequestCount: totalUpstream,
+        rowsMatched: 0,
+        elapsedMs: Date.now() - startedAt,
+        fallbackReason,
+        piDocumentCount: req.piDocuments.length,
+        piDocSample,
+        ...fb.meta,
       },
     });
   }
 
-  return jsonRes(200, {
-    ok: true,
-    gl: glMatched,
-    meta: baseMeta,
-  });
+  const baseMeta: Meta = {
+    strategy: "general-ledger-fallback",
+    targetInvoiceCount: req.piDocuments.length,
+    upstreamRequestCount: totalUpstream,
+    rowsMatched: fb.gl.length,
+    elapsedMs: Date.now() - startedAt,
+    fallbackReason,
+    piDocumentCount: req.piDocuments.length,
+    piDocSample,
+    ...fb.meta,
+  };
+
+  if (fb.unresolved.length > 0) {
+    return jsonRes(200, {
+      ok: false,
+      kind: "incomplete",
+      error: `Unable to uniquely resolve ${fb.unresolved.length} General Ledger row${fb.unresolved.length === 1 ? "" : "s"} to a target Purchase Invoice.`,
+      meta: {
+        ...baseMeta,
+        unresolvedCount: fb.unresolved.length,
+        unresolvedRows: fb.unresolved,
+      },
+    });
+  }
+
+  return jsonRes(200, { ok: true, gl: fb.gl, meta: baseMeta });
 }
 
 export const Route = createFileRoute("/api/reports/purchase-audit")({

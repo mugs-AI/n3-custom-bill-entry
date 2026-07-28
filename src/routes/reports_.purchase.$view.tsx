@@ -44,6 +44,8 @@ import {
   type PurchaseAuditResult,
 } from "@/lib/audit-trail";
 import { canonicalDocCode } from "@/lib/report-keys";
+import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
+
 
 // ----- Route --------------------------------------------------------------
 
@@ -132,14 +134,20 @@ interface AuditFetchReply {
   error?: string;
   gl?: GLRow[];
   meta?: {
+    strategy?: "purchase-invoice-glposting" | "general-ledger-fallback";
+    targetInvoiceCount?: number;
+    upstreamRequestCount?: number;
+    rowsMatched?: number;
+    elapsedMs?: number;
+    fallbackReason?: string;
     piDocumentCount: number;
-    accountsFetched: number;
+    accountsFetched?: number;
     accountsFromApi?: number;
     accountsFromSuppliers?: number;
-    accountsWithHits: number;
-    accountsWithNoRows: string[];
-    glRowsFetched: number;
-    glRowsMatched: number;
+    accountsWithHits?: number;
+    accountsWithNoRows?: string[];
+    glRowsFetched?: number;
+    glRowsMatched?: number;
     piDocSample: string[];
     unresolvedCount?: number;
     unresolvedRows?: Array<{
@@ -152,6 +160,7 @@ interface AuditFetchReply {
     }>;
   };
 }
+
 
 async function fetchAudit(
   filter: ReportCriteria,
@@ -304,13 +313,40 @@ function PurchaseReportPage() {
 
   const isAccountingView = viewId === "audit-trail" || viewId === "posting-account";
 
+  // Correction E §6: a stable audit fingerprint drawn from the current GL
+  // Analysis data. Any change in an invoice's identity or accounting amount
+  // changes the fingerprint and therefore the cache key.
+  const auditFingerprint = useMemo(() => computeAuditFingerprint(cached), [cached]);
+  const authScope = useMemo(() => (hydrated ? getAuthScope() : { tenantId: "", userId: "" }), [hydrated]);
+  const normalizedFilter = useMemo(() => {
+    if (!inquiry) return null;
+    return {
+      dateFrom: inquiry.filter.dateFrom,
+      dateTo: inquiry.filter.dateTo,
+      supplierId: inquiry.filter.supplierId ?? null,
+      purchaserId: inquiry.filter.purchaserId ?? null,
+      projectId: inquiry.filter.projectId ?? null,
+      stockId: inquiry.filter.stockId ?? null,
+      taxCodeId: inquiry.filter.taxCodeId ?? null,
+      hqSequence: (inquiry.filter.hqSequence ?? "").trim() || null,
+    };
+  }, [inquiry]);
+
   const auditQ = useQuery<AuditFetchReply, Error>({
-    queryKey: ["purchase-audit", inquiry?.filter, piDocuments.length],
+    queryKey: [
+      "purchase-audit",
+      authScope.tenantId,
+      authScope.userId,
+      normalizedFilter,
+      auditFingerprint,
+    ],
     enabled: hydrated && !!token && !!cached && isAccountingView && piDocuments.length > 0,
     queryFn: () => fetchAudit(inquiry!.filter, piDocuments),
     staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
     retry: false,
   });
+
 
   const auditResult: PurchaseAuditResult | null = useMemo(() => {
     const data = auditQ.data;
@@ -371,6 +407,7 @@ function PurchaseReportPage() {
                 data={auditQ.data ?? null}
                 result={auditResult}
                 docCodeToInvoiceId={docCodeToInvoiceId}
+                piCount={piDocuments.length}
                 onRetry={() => auditQ.refetch()}
               />
             )}
@@ -380,8 +417,10 @@ function PurchaseReportPage() {
                 error={auditQ.error ?? null}
                 data={auditQ.data ?? null}
                 result={auditResult}
+                piCount={piDocuments.length}
                 onRetry={() => auditQ.refetch()}
               />
+
             )}
             {!isAccountingView && <DimensionView view={viewId} report={cached} />}
           </>
@@ -666,6 +705,7 @@ function AuditTrailView({
   data,
   result,
   docCodeToInvoiceId,
+  piCount,
   onRetry,
 }: {
   loading: boolean;
@@ -673,14 +713,14 @@ function AuditTrailView({
   data: AuditFetchReply | null;
   result: PurchaseAuditResult | null;
   docCodeToInvoiceId: Map<string, string>;
+  piCount: number;
   onRetry: () => void;
 }) {
   if (loading)
     return (
       <div className="app-card p-6 text-sm text-muted-foreground">
-        <div>Enumerating active GL accounts…</div>
-        <div>Fetching General Ledger transactions per account…</div>
-        <div>Reconciling against the current Purchase Invoice set…</div>
+        Loading Account Journals for {piCount} Purchase Invoice
+        {piCount === 1 ? "" : "s"}…
       </div>
     );
   if (error)
@@ -691,6 +731,7 @@ function AuditTrailView({
         onRetry={onRetry}
       />
     );
+
   if (!data || !result) return null;
   return (
     <div className="space-y-3">
@@ -796,13 +837,20 @@ function AuditReconcileHeader({
   result: PurchaseAuditResult;
   data: AuditFetchReply;
 }) {
+  const strategy = data.meta?.strategy;
+  const elapsed =
+    typeof data.meta?.elapsedMs === "number"
+      ? Math.max(1, Math.round(data.meta.elapsedMs / 100) / 10)
+      : null;
+  const targetPIs = data.meta?.targetInvoiceCount ?? data.meta?.piDocumentCount ?? 0;
+  const rowsMatched = data.meta?.rowsMatched ?? result.glRowsUsed;
   return (
     <div className="app-card p-3 text-[12px]">
       <div className="grid gap-2 md:grid-cols-4">
-        <MiniStat label="Target PIs" value={String(data.meta?.piDocumentCount ?? 0)} />
+        <MiniStat label="Target PIs" value={String(targetPIs)} />
         <MiniStat
-          label="Active GL accounts scanned"
-          value={String(data.meta?.accountsFetched ?? 0)}
+          label="Upstream requests"
+          value={String(data.meta?.upstreamRequestCount ?? 0)}
         />
         <MiniStat label="GL rows matched" value={String(result.glRowsUsed)} />
         <MiniStat
@@ -810,6 +858,23 @@ function AuditReconcileHeader({
           value={String(result.documents.length)}
         />
       </div>
+      {strategy && (
+        <div className="no-print mt-2 text-muted-foreground">
+          {strategy === "purchase-invoice-glposting" ? (
+            <>
+              Source: N3 Purchase Invoice Account Journal · {targetPIs} invoice
+              {targetPIs === 1 ? "" : "s"} · {rowsMatched} row
+              {rowsMatched === 1 ? "" : "s"}
+              {elapsed != null ? ` · ${elapsed}s` : ""}
+            </>
+          ) : (
+            <>
+              Source: N3 General Ledger fallback
+              {data.meta?.fallbackReason ? ` — ${data.meta.fallbackReason}` : ""}
+            </>
+          )}
+        </div>
+      )}
       {result.docsWithoutGL.length > 0 && (
         <div className="mt-2 text-destructive">
           {result.docsWithoutGL.length} Purchase Invoice
@@ -839,20 +904,24 @@ function PostingAccountView({
   error,
   data,
   result,
+  piCount,
   onRetry,
 }: {
   loading: boolean;
   error: Error | null;
   data: AuditFetchReply | null;
   result: PurchaseAuditResult | null;
+  piCount: number;
   onRetry: () => void;
 }) {
   if (loading)
     return (
       <div className="app-card p-6 text-sm text-muted-foreground">
-        Loading Posting Account totals…
+        Loading Account Journals for {piCount} Purchase Invoice
+        {piCount === 1 ? "" : "s"}…
       </div>
     );
+
   if (error)
     return (
       <ErrorCard

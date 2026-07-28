@@ -160,9 +160,22 @@ export function normalizeAccountRows(
     if (k) piDocSet.add(k);
   }
 
+  // Correction E §4: the initial context is the requested account. Any
+  // explicit account returned by N3 replaces it; blank-account continuation
+  // rows inherit the last explicit context (never the supplier or any other
+  // query key).
+  let lastAcctCode = account.accountCode;
+  let lastAcctName = account.accountName;
+
   for (const r of rawRows) {
-    const resolvedAccountCode = nonBlank(r.accountCode) || account.accountCode;
-    const resolvedAccountName = nonBlank(r.accountName) || account.accountName;
+    const explicitCode = nonBlank(r.accountCode);
+    const explicitName = nonBlank(r.accountName);
+    if (explicitCode) {
+      lastAcctCode = explicitCode;
+      lastAcctName = explicitName || lastAcctName;
+    }
+    const resolvedAccountCode = explicitCode || lastAcctCode;
+    const resolvedAccountName = explicitCode ? explicitName : lastAcctName;
     const rowDocKey = canonicalDocCode(r.docCode);
 
     if (rowDocKey && piDocSet.has(rowDocKey)) {
@@ -185,16 +198,29 @@ export function normalizeAccountRows(
 
     const sinvKey = canonicalDocCode(r.supplierInvNo);
     const dateKey = normDate(r.docDate);
-    if (!sinvKey || !dateKey) {
-      // No usable fallback fingerprint; silently drop.
+    // Correction E §4.4: a blank date must not block a unique Supplier INV#
+    // match. Supplier INV# is still required.
+    if (!sinvKey) {
+      if (isNonZero) {
+        unresolved.push({
+          accountCode: resolvedAccountCode,
+          docDate: dateKey,
+          supplierInvNo: nonBlank(r.supplierInvNo),
+          debit,
+          credit,
+          reason: "no-match",
+        });
+      }
       continue;
     }
 
     let candidates = piDocuments.filter(
-      (p) =>
-        canonicalDocCode(p.supplierInvNo) === sinvKey &&
-        normDate(p.docDate) === dateKey,
+      (p) => canonicalDocCode(p.supplierInvNo) === sinvKey,
     );
+    if (candidates.length > 1 && dateKey) {
+      const narrowed = candidates.filter((p) => normDate(p.docDate) === dateKey);
+      if (narrowed.length > 0) candidates = narrowed;
+    }
     if (candidates.length > 1 && wantedAccountKey) {
       const narrowed = candidates.filter(
         (p) => canonicalAccountCode(p.supplierCode) === wantedAccountKey,
@@ -212,19 +238,18 @@ export function normalizeAccountRows(
       continue;
     }
 
-    if (candidates.length >= 1 && isNonZero) {
-      // ambiguous — record so the caller can fail the audit as incomplete.
+    if (isNonZero) {
       unresolved.push({
         accountCode: resolvedAccountCode,
         docDate: dateKey,
         supplierInvNo: nonBlank(r.supplierInvNo),
         debit,
         credit,
-        reason: "ambiguous",
+        reason: candidates.length === 0 ? "no-match" : "ambiguous",
       });
     }
-    // candidates.length === 0 → no target PI plausibly matches; drop.
   }
 
   return { rows: kept, unresolved };
 }
+
