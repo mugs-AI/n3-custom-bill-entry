@@ -837,13 +837,20 @@ function AuditReconcileHeader({
   result: PurchaseAuditResult;
   data: AuditFetchReply;
 }) {
+  const strategy = data.meta?.strategy;
+  const elapsed =
+    typeof data.meta?.elapsedMs === "number"
+      ? Math.max(1, Math.round(data.meta.elapsedMs / 100) / 10)
+      : null;
+  const targetPIs = data.meta?.targetInvoiceCount ?? data.meta?.piDocumentCount ?? 0;
+  const rowsMatched = data.meta?.rowsMatched ?? result.glRowsUsed;
   return (
     <div className="app-card p-3 text-[12px]">
       <div className="grid gap-2 md:grid-cols-4">
-        <MiniStat label="Target PIs" value={String(data.meta?.piDocumentCount ?? 0)} />
+        <MiniStat label="Target PIs" value={String(targetPIs)} />
         <MiniStat
-          label="Active GL accounts scanned"
-          value={String(data.meta?.accountsFetched ?? 0)}
+          label="Upstream requests"
+          value={String(data.meta?.upstreamRequestCount ?? 0)}
         />
         <MiniStat label="GL rows matched" value={String(result.glRowsUsed)} />
         <MiniStat
@@ -851,6 +858,23 @@ function AuditReconcileHeader({
           value={String(result.documents.length)}
         />
       </div>
+      {strategy && (
+        <div className="no-print mt-2 text-muted-foreground">
+          {strategy === "purchase-invoice-glposting" ? (
+            <>
+              Source: N3 Purchase Invoice Account Journal · {targetPIs} invoice
+              {targetPIs === 1 ? "" : "s"} · {rowsMatched} row
+              {rowsMatched === 1 ? "" : "s"}
+              {elapsed != null ? ` · ${elapsed}s` : ""}
+            </>
+          ) : (
+            <>
+              Source: N3 General Ledger fallback
+              {data.meta?.fallbackReason ? ` — ${data.meta.fallbackReason}` : ""}
+            </>
+          )}
+        </div>
+      )}
       {result.docsWithoutGL.length > 0 && (
         <div className="mt-2 text-destructive">
           {result.docsWithoutGL.length} Purchase Invoice
@@ -880,20 +904,24 @@ function PostingAccountView({
   error,
   data,
   result,
+  piCount,
   onRetry,
 }: {
   loading: boolean;
   error: Error | null;
   data: AuditFetchReply | null;
   result: PurchaseAuditResult | null;
+  piCount: number;
   onRetry: () => void;
 }) {
   if (loading)
     return (
       <div className="app-card p-6 text-sm text-muted-foreground">
-        Loading Posting Account totals…
+        Loading Account Journals for {piCount} Purchase Invoice
+        {piCount === 1 ? "" : "s"}…
       </div>
     );
+
   if (error)
     return (
       <ErrorCard
