@@ -407,6 +407,7 @@ function PurchaseReportPage() {
                 data={auditQ.data ?? null}
                 result={auditResult}
                 docCodeToInvoiceId={docCodeToInvoiceId}
+                piCount={piDocuments.length}
                 onRetry={() => auditQ.refetch()}
               />
             )}
@@ -416,8 +417,10 @@ function PurchaseReportPage() {
                 error={auditQ.error ?? null}
                 data={auditQ.data ?? null}
                 result={auditResult}
+                piCount={piDocuments.length}
                 onRetry={() => auditQ.refetch()}
               />
+
             )}
             {!isAccountingView && <DimensionView view={viewId} report={cached} />}
           </>
