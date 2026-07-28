@@ -313,13 +313,40 @@ function PurchaseReportPage() {
 
   const isAccountingView = viewId === "audit-trail" || viewId === "posting-account";
 
+  // Correction E §6: a stable audit fingerprint drawn from the current GL
+  // Analysis data. Any change in an invoice's identity or accounting amount
+  // changes the fingerprint and therefore the cache key.
+  const auditFingerprint = useMemo(() => computeAuditFingerprint(cached), [cached]);
+  const authScope = useMemo(() => (hydrated ? getAuthScope() : { tenantId: "", userId: "" }), [hydrated]);
+  const normalizedFilter = useMemo(() => {
+    if (!inquiry) return null;
+    return {
+      dateFrom: inquiry.filter.dateFrom,
+      dateTo: inquiry.filter.dateTo,
+      supplierId: inquiry.filter.supplierId ?? null,
+      purchaserId: inquiry.filter.purchaserId ?? null,
+      projectId: inquiry.filter.projectId ?? null,
+      stockId: inquiry.filter.stockId ?? null,
+      taxCodeId: inquiry.filter.taxCodeId ?? null,
+      hqSequence: (inquiry.filter.hqSequence ?? "").trim() || null,
+    };
+  }, [inquiry]);
+
   const auditQ = useQuery<AuditFetchReply, Error>({
-    queryKey: ["purchase-audit", inquiry?.filter, piDocuments.length],
+    queryKey: [
+      "purchase-audit",
+      authScope.tenantId,
+      authScope.userId,
+      normalizedFilter,
+      auditFingerprint,
+    ],
     enabled: hydrated && !!token && !!cached && isAccountingView && piDocuments.length > 0,
     queryFn: () => fetchAudit(inquiry!.filter, piDocuments),
     staleTime: 5 * 60_000,
+    gcTime: 30 * 60_000,
     retry: false,
   });
+
 
   const auditResult: PurchaseAuditResult | null = useMemo(() => {
     const data = auditQ.data;
