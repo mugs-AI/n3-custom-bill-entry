@@ -1046,10 +1046,15 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
           queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY });
           if (isEdit && invoiceId) {
             queryClient.invalidateQueries({ queryKey: ["n3", "purchaseInvoice", invoiceId] });
+            // Correction E §6: audit results are now fingerprinted from GL
+            // Analysis data. When the operator updates a PI, drop every
+            // cached Purchase Audit query so the next open recomputes.
+            queryClient.invalidateQueries({ queryKey: ["purchase-audit"] });
           }
         } catch {
           /* best effort */
         }
+
         setSave({
           status: "success",
           docCode: d.docCode,
