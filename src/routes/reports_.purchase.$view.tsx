@@ -134,14 +134,20 @@ interface AuditFetchReply {
   error?: string;
   gl?: GLRow[];
   meta?: {
+    strategy?: "purchase-invoice-glposting" | "general-ledger-fallback";
+    targetInvoiceCount?: number;
+    upstreamRequestCount?: number;
+    rowsMatched?: number;
+    elapsedMs?: number;
+    fallbackReason?: string;
     piDocumentCount: number;
-    accountsFetched: number;
+    accountsFetched?: number;
     accountsFromApi?: number;
     accountsFromSuppliers?: number;
-    accountsWithHits: number;
-    accountsWithNoRows: string[];
-    glRowsFetched: number;
-    glRowsMatched: number;
+    accountsWithHits?: number;
+    accountsWithNoRows?: string[];
+    glRowsFetched?: number;
+    glRowsMatched?: number;
     piDocSample: string[];
     unresolvedCount?: number;
     unresolvedRows?: Array<{
@@ -154,6 +160,7 @@ interface AuditFetchReply {
     }>;
   };
 }
+
 
 async function fetchAudit(
   filter: ReportCriteria,
