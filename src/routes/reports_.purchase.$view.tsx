@@ -293,17 +293,24 @@ function PurchaseReportPage() {
   // Header
   return (
     <AppShell>
-      <div className="space-y-4 report-container">
-        <div className="no-print flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">{meta.title}</h1>
-            <p className="text-sm text-muted-foreground">{meta.blurb}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link to="/reports" className="app-btn">
-              ← Back to GL Analysis
-            </Link>
-            {cached && (
+      <div className="space-y-3 report-container">
+        {/* Title stays visible in print (Task 1). */}
+        <div className="print-keep-with-next">
+          <h1 className="report-title text-xl font-semibold tracking-tight">
+            {meta.title}
+          </h1>
+          <p className="report-subtitle text-sm text-muted-foreground">{meta.blurb}</p>
+        </div>
+
+        <div className="no-print flex flex-wrap items-end justify-end gap-2">
+          <Link to="/reports" className="app-btn">
+            ← Back to GL Analysis
+          </Link>
+          {cached && (
+            <>
+              <Link to="/reports/purchase/print-all" className="app-btn">
+                Print All 8 Reports
+              </Link>
               <button
                 type="button"
                 className="app-btn app-btn-primary"
@@ -311,8 +318,8 @@ function PurchaseReportPage() {
               >
                 Print
               </button>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         <ReportNav current={viewId} />
@@ -335,7 +342,11 @@ function PurchaseReportPage() {
           </div>
         ) : (
           <>
-            <InquiryStamp filter={inquiry.filter} report={cached} />
+            <CompactReportHeader
+              filter={inquiry.filter}
+              report={cached}
+              audit={isAccountingView ? { data: auditQ.data ?? null, result: auditResult } : undefined}
+            />
             {viewId === "audit-trail" && (
               <AuditTrailView
                 loading={auditQ.isPending && auditQ.fetchStatus !== "idle"}
@@ -356,7 +367,6 @@ function PurchaseReportPage() {
                 piCount={piDocuments.length}
                 onRetry={() => auditQ.refetch()}
               />
-
             )}
             {!isAccountingView && <DimensionView view={viewId} report={cached} />}
           </>
