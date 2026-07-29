@@ -610,6 +610,9 @@ function PurchaseReportLauncher() {
             {l.label}
           </Link>
         ))}
+        <Link to="/reports/purchase/print-all" className="app-btn app-btn-primary text-[12px]">
+          Print All 8 Reports
+        </Link>
       </div>
       <div className="mt-2 text-[11px] text-muted-foreground">
         Each report reuses this inquiry's filters and data. Change filters and re-run to

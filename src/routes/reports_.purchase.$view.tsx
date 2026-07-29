@@ -18,7 +18,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
-import { getToken } from "@/lib/auth-store";
 import { getAuthScope } from "@/lib/draft-store";
 import { isoToMy } from "@/lib/date-my";
 import { round2, sumTo2dp } from "@/lib/money";
@@ -39,43 +38,71 @@ import {
   reconcileAudit,
   type AuditDocument,
   type AuditPIDocument,
-  type GLRow,
   type PostingAccountRow,
   type PurchaseAuditResult,
 } from "@/lib/audit-trail";
 import { canonicalDocCode } from "@/lib/report-keys";
 import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
+import {
+  fetchAudit,
+  loadInquiry,
+  normalizeAuditFilter,
+  type AuditFetchReply,
+} from "@/lib/purchase-report-inquiry";
 
 
 // ----- Route --------------------------------------------------------------
 
-type ViewId =
+export type ViewId =
   | "audit-trail"
   | "posting-account"
   | DimensionKey;
 
-const VIEW_META: Record<ViewId, { title: string; blurb: string }> = {
+export const VIEW_META: Record<ViewId, { title: string; navLabel: string; blurb: string }> = {
   "audit-trail": {
     title: "Purchase Audit Trail",
+    navLabel: "Purchase Audit Trail",
     blurb:
       "Every Purchase Invoice with its supplier creditor line and every reconciled GL posting per document.",
   },
   "posting-account": {
     title: "Posting Account Summary",
+    navLabel: "Posting Account Summary",
     blurb: "GL Debit and Credit totals per posting account for the current audit set.",
   },
-  wbs: { title: "Summary of WBS", blurb: "Live totals grouped by WBS / Stock." },
+  wbs: {
+    title: "Summary of WBS — N3 Stock Codes",
+    navLabel: "WBS",
+    blurb: "Live totals grouped by WBS / Stock.",
+  },
   "hq-sequence": {
-    title: "Summary of HQ Sequence",
+    title: "Summary of HQ Sequence — N3 Purchase Description",
+    navLabel: "HQ Sequence",
     blurb: "Live totals grouped by HQ Sequence (Purchase Invoice description).",
   },
-  "cost-centre": { title: "Summary of Cost Centre", blurb: "Live totals grouped by Cost Centre / Project." },
-  "order-number": { title: "Summary of Order Number", blurb: "Live totals grouped by Order No. / Tariff Code." },
-  "payment-type": { title: "Summary of Payment Type", blurb: "Live totals grouped by Payment Type / Purchaser." },
-  "hq-tax": { title: "Summary of HQ Tax", blurb: "Live totals grouped by HQ Tax / Input Tax Code." },
+  "cost-centre": {
+    title: "Summary of Cost Centre — N3 Project Codes",
+    navLabel: "Cost Centre",
+    blurb: "Live totals grouped by Cost Centre / Project.",
+  },
+  "order-number": {
+    title: "Summary of Order Number — N3 Tariff Codes",
+    navLabel: "Order Number",
+    blurb: "Live totals grouped by Order No. / Tariff Code.",
+  },
+  "payment-type": {
+    title: "Summary of Payment Type — N3 Purchaser",
+    navLabel: "Payment Type",
+    blurb: "Live totals grouped by Payment Type / Purchaser.",
+  },
+  "hq-tax": {
+    title: "Summary of HQ Tax — N3 SST Tax Codes",
+    navLabel: "HQ Tax",
+    blurb: "Live totals grouped by HQ Tax / Input Tax Code.",
+  },
 };
 
-const VIEW_IDS: ViewId[] = [
+export const VIEW_IDS: ViewId[] = [
   "audit-trail",
   "posting-account",
   "wbs",
@@ -85,6 +112,10 @@ const VIEW_IDS: ViewId[] = [
   "payment-type",
   "hq-tax",
 ];
+
+export function isAccountingView(v: ViewId): boolean {
+  return v === "audit-trail" || v === "posting-account";
+}
 
 export const Route = createFileRoute("/reports_/purchase/$view")({
   head: ({ params }) => {
@@ -108,92 +139,6 @@ function fmt(n: number): string {
   return MYR.format(Number.isFinite(n) ? n : 0);
 }
 
-// ----- Inquiry restoration ------------------------------------------------
-
-function loadInquiry(): { filter: ReportCriteria; ran: boolean } | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const scope = getAuthScope();
-    const raw = window.sessionStorage.getItem(
-      `custom-bill-entry:gl-analysis-inquiry:${scope.tenantId}:${scope.userId}`,
-    );
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as { filter?: ReportCriteria; ran?: boolean };
-    if (!parsed?.filter?.dateFrom || !parsed.filter.dateTo) return null;
-    return { filter: parsed.filter, ran: !!parsed.ran };
-  } catch {
-    return null;
-  }
-}
-
-// ----- Purchase Audit fetch (Views 1-2) -----------------------------------
-
-interface AuditFetchReply {
-  ok: boolean;
-  kind?: string;
-  error?: string;
-  gl?: GLRow[];
-  meta?: {
-    strategy?: "purchase-invoice-glposting" | "general-ledger-fallback";
-    targetInvoiceCount?: number;
-    upstreamRequestCount?: number;
-    rowsMatched?: number;
-    elapsedMs?: number;
-    fallbackReason?: string;
-    piDocumentCount: number;
-    accountsFetched?: number;
-    accountsFromApi?: number;
-    accountsFromSuppliers?: number;
-    accountsWithHits?: number;
-    accountsWithNoRows?: string[];
-    glRowsFetched?: number;
-    glRowsMatched?: number;
-    piDocSample: string[];
-    unresolvedCount?: number;
-    unresolvedRows?: Array<{
-      accountCode: string;
-      docDate: string;
-      supplierInvNo: string;
-      debit: number;
-      credit: number;
-      reason: "no-match" | "ambiguous";
-    }>;
-  };
-}
-
-
-async function fetchAudit(
-  filter: ReportCriteria,
-  piDocuments: AuditPIDocument[],
-): Promise<AuditFetchReply> {
-  const token = getToken();
-  if (!token) throw new Error("Not signed in to N3.");
-  const res = await fetch("/api/reports/purchase-audit", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      dateFrom: filter.dateFrom,
-      dateTo: filter.dateTo,
-      piDocuments,
-    }),
-  });
-  const text = await res.text();
-  let body: AuditFetchReply | null = null;
-  try {
-    body = text ? (JSON.parse(text) as AuditFetchReply) : null;
-  } catch {
-    body = null;
-  }
-  if (!res.ok || !body?.ok) {
-    const err = new Error(body?.error || `Purchase Audit failed (${res.status})`);
-    throw err;
-  }
-  return body;
-}
 
 // ----- Component ---------------------------------------------------------
 
@@ -318,19 +263,10 @@ function PurchaseReportPage() {
   // changes the fingerprint and therefore the cache key.
   const auditFingerprint = useMemo(() => computeAuditFingerprint(cached), [cached]);
   const authScope = useMemo(() => (hydrated ? getAuthScope() : { tenantId: "", userId: "" }), [hydrated]);
-  const normalizedFilter = useMemo(() => {
-    if (!inquiry) return null;
-    return {
-      dateFrom: inquiry.filter.dateFrom,
-      dateTo: inquiry.filter.dateTo,
-      supplierId: inquiry.filter.supplierId ?? null,
-      purchaserId: inquiry.filter.purchaserId ?? null,
-      projectId: inquiry.filter.projectId ?? null,
-      stockId: inquiry.filter.stockId ?? null,
-      taxCodeId: inquiry.filter.taxCodeId ?? null,
-      hqSequence: (inquiry.filter.hqSequence ?? "").trim() || null,
-    };
-  }, [inquiry]);
+  const normalizedFilter = useMemo(
+    () => (inquiry ? normalizeAuditFilter(inquiry.filter) : null),
+    [inquiry],
+  );
 
   const auditQ = useQuery<AuditFetchReply, Error>({
     queryKey: [
@@ -357,17 +293,24 @@ function PurchaseReportPage() {
   // Header
   return (
     <AppShell>
-      <div className="space-y-4 report-container">
-        <div className="no-print flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">{meta.title}</h1>
-            <p className="text-sm text-muted-foreground">{meta.blurb}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link to="/reports" className="app-btn">
-              ← Back to GL Analysis
-            </Link>
-            {cached && (
+      <div className="space-y-3 report-container">
+        {/* Title stays visible in print (Task 1). */}
+        <div className="print-keep-with-next">
+          <h1 className="report-title text-xl font-semibold tracking-tight">
+            {meta.title}
+          </h1>
+          <p className="report-subtitle text-sm text-muted-foreground">{meta.blurb}</p>
+        </div>
+
+        <div className="no-print flex flex-wrap items-end justify-end gap-2">
+          <Link to="/reports" className="app-btn">
+            ← Back to GL Analysis
+          </Link>
+          {cached && (
+            <>
+              <Link to="/reports/purchase/print-all" className="app-btn">
+                Print All 8 Reports
+              </Link>
               <button
                 type="button"
                 className="app-btn app-btn-primary"
@@ -375,8 +318,8 @@ function PurchaseReportPage() {
               >
                 Print
               </button>
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         <ReportNav current={viewId} />
@@ -399,7 +342,11 @@ function PurchaseReportPage() {
           </div>
         ) : (
           <>
-            <InquiryStamp filter={inquiry.filter} report={cached} />
+            <CompactReportHeader
+              filter={inquiry.filter}
+              report={cached}
+              audit={isAccountingView ? { data: auditQ.data ?? null, result: auditResult } : undefined}
+            />
             {viewId === "audit-trail" && (
               <AuditTrailView
                 loading={auditQ.isPending && auditQ.fetchStatus !== "idle"}
@@ -420,7 +367,6 @@ function PurchaseReportPage() {
                 piCount={piDocuments.length}
                 onRetry={() => auditQ.refetch()}
               />
-
             )}
             {!isAccountingView && <DimensionView view={viewId} report={cached} />}
           </>
@@ -446,44 +392,103 @@ function ReportNav({ current }: { current: ViewId }) {
               : "text-muted-foreground hover:bg-surface hover:text-foreground"
           }`}
         >
-          {VIEW_META[id].title.replace(/^Summary of /, "")}
+          {VIEW_META[id].navLabel}
         </Link>
       ))}
     </div>
   );
 }
 
-function InquiryStamp({ filter, report }: { filter: ReportCriteria; report: ReportData }) {
+/**
+ * Combined single-card header (Task 2). Replaces the earlier InquiryStamp +
+ * AuditReconcileHeader stack so print pages don't waste vertical space on
+ * duplicate framing. Accounting views pass `audit` to include the extra
+ * mini-stats and warnings; dimension views omit it.
+ */
+export function CompactReportHeader({
+  filter,
+  report,
+  audit,
+}: {
+  filter: ReportCriteria;
+  report: ReportData;
+  audit?: { data: AuditFetchReply | null; result: PurchaseAuditResult | null };
+}) {
+  const auditData = audit?.data;
+  const auditResult = audit?.result;
+  const targetPIs =
+    auditData?.meta?.targetInvoiceCount ?? auditData?.meta?.piDocumentCount ?? 0;
   return (
-    <div className="app-card p-3 text-[12px] text-muted-foreground print:border print:border-black/20">
-      <div className="grid gap-1 md:grid-cols-3">
+    <div className="app-card compact-report-header p-3 text-[12px] print-keep-with-next">
+      <div className="grid gap-2 md:grid-cols-3">
         <div>
-          <div className="text-[10px] font-semibold uppercase">Period</div>
-          <div className="text-foreground">
+          <div className="crh-label text-[10px] font-semibold uppercase text-muted-foreground">
+            Period
+          </div>
+          <div className="crh-value text-foreground">
             {isoToMy(filter.dateFrom)} → {isoToMy(filter.dateTo)}
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-semibold uppercase">Coverage</div>
-          <div className="text-foreground">
-            {report.fetchedInvoiceCount} Purchase Invoice{report.fetchedInvoiceCount === 1 ? "" : "s"} ·{" "}
-            {report.summary.lineCount} line{report.summary.lineCount === 1 ? "" : "s"}
+          <div className="crh-label text-[10px] font-semibold uppercase text-muted-foreground">
+            Coverage
+          </div>
+          <div className="crh-value text-foreground">
+            {report.fetchedInvoiceCount} Purchase Invoice
+            {report.fetchedInvoiceCount === 1 ? "" : "s"} · {report.summary.lineCount} line
+            {report.summary.lineCount === 1 ? "" : "s"}
           </div>
         </div>
         <div>
-          <div className="text-[10px] font-semibold uppercase">GL Analysis totals (MYR)</div>
-          <div className="tabular text-foreground">
-            Before {fmt(report.summary.beforeTax)} · Tax {fmt(report.summary.taxAmount)} · Incl {fmt(report.summary.includingTax)}
+          <div className="crh-label text-[10px] font-semibold uppercase text-muted-foreground">
+            GL Analysis totals (MYR)
+          </div>
+          <div className="crh-value tabular text-foreground">
+            Before {fmt(report.summary.beforeTax)} · Tax {fmt(report.summary.taxAmount)} · Incl{" "}
+            {fmt(report.summary.includingTax)}
           </div>
         </div>
       </div>
+      {audit && auditData && auditResult && (
+        <>
+          <div className="mt-2 grid gap-2 border-t border-border/60 pt-2 md:grid-cols-4">
+            <MiniStat label="Target PIs" value={String(targetPIs)} />
+            <MiniStat
+              label="Upstream requests"
+              value={String(auditData.meta?.upstreamRequestCount ?? 0)}
+            />
+            <MiniStat label="GL rows matched" value={String(auditResult.glRowsUsed)} />
+            <MiniStat
+              label="Documents reconciled"
+              value={String(auditResult.documents.length)}
+            />
+          </div>
+          {auditResult.docsWithoutGL.length > 0 && (
+            <div className="crh-warn mt-1.5 text-destructive">
+              {auditResult.docsWithoutGL.length} Purchase Invoice
+              {auditResult.docsWithoutGL.length === 1 ? "" : "s"} had no matching GL postings:{" "}
+              <span className="tabular">
+                {auditResult.docsWithoutGL.slice(0, 6).join(", ")}
+                {auditResult.docsWithoutGL.length > 6 ? "…" : ""}
+              </span>
+            </div>
+          )}
+          {auditResult.incompleteReasons.length > 0 && (
+            <ul className="crh-warn mt-1.5 list-disc pl-5 text-destructive">
+              {auditResult.incompleteReasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
 // ----- Dimension views (3-8) ----------------------------------------------
 
-function DimensionView({ view, report }: { view: DimensionKey; report: ReportData }) {
+export function DimensionView({ view, report }: { view: DimensionKey; report: ReportData }) {
   const spec = DIMENSION_SPECS[view];
   const rows = useMemo(() => groupByDimension(report.lines, view), [report.lines, view]);
   const totals = useMemo(() => totalOf(rows), [rows]);
@@ -699,7 +704,7 @@ function DimensionDrillPanel({
 
 // ----- View 1: Purchase Audit Trail ---------------------------------------
 
-function AuditTrailView({
+export function AuditTrailView({
   loading,
   error,
   data,
@@ -735,7 +740,6 @@ function AuditTrailView({
   if (!data || !result) return null;
   return (
     <div className="space-y-3">
-      <AuditReconcileHeader result={result} data={data} />
       {result.documents.length === 0 ? (
         <div className="app-card p-6 text-sm text-muted-foreground">
           No documents in the audit set.
@@ -763,7 +767,7 @@ function AuditTrailView({
 function AuditDocumentCard({ doc, invoiceId }: { doc: AuditDocument; invoiceId: string }) {
   return (
     <div
-      className={`app-card overflow-hidden print:break-inside-avoid ${
+      className={`app-card overflow-hidden ${
         doc.incomplete ? "border-l-4 border-l-destructive" : "border-l-4 border-l-success"
       }`}
     >
@@ -899,7 +903,7 @@ function AuditReconcileHeader({
 
 // ----- View 2: Posting Account Summary ------------------------------------
 
-function PostingAccountView({
+export function PostingAccountView({
   loading,
   error,
   data,
@@ -934,7 +938,7 @@ function PostingAccountView({
   const notEvaluated = result.balanceStatus === "not-evaluated";
   return (
     <div className="space-y-3">
-      <AuditReconcileHeader result={result} data={data} />
+      
       {notEvaluated && (
         <div className="app-card border-l-4 border-l-destructive p-3 text-sm">
           Posting Account Summary was not evaluated: no GL rows matched the current Purchase Invoice set.
@@ -1076,7 +1080,7 @@ function Td({
 // PI Number link. When we know the immutable N3 invoice id, render a link
 // into /purchase-invoices/{id}/edit. Otherwise show the number as plain
 // text with a tooltip so the operator understands why it isn't clickable.
-function PILink({ invoiceId, docCode }: { invoiceId: string; docCode: string }) {
+export function PILink({ invoiceId, docCode }: { invoiceId: string; docCode: string }) {
   if (!invoiceId) {
     return (
       <span title="Edit link unavailable (no N3 invoice id in the current inquiry)">
