@@ -767,7 +767,7 @@ function AuditTrailView({
 function AuditDocumentCard({ doc, invoiceId }: { doc: AuditDocument; invoiceId: string }) {
   return (
     <div
-      className={`app-card overflow-hidden print:break-inside-avoid ${
+      className={`app-card overflow-hidden ${
         doc.incomplete ? "border-l-4 border-l-destructive" : "border-l-4 border-l-success"
       }`}
     >
