@@ -18,7 +18,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
-import { getToken } from "@/lib/auth-store";
 import { getAuthScope } from "@/lib/draft-store";
 import { isoToMy } from "@/lib/date-my";
 import { round2, sumTo2dp } from "@/lib/money";
@@ -39,12 +38,17 @@ import {
   reconcileAudit,
   type AuditDocument,
   type AuditPIDocument,
-  type GLRow,
   type PostingAccountRow,
   type PurchaseAuditResult,
 } from "@/lib/audit-trail";
 import { canonicalDocCode } from "@/lib/report-keys";
 import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
+import {
+  fetchAudit,
+  loadInquiry,
+  normalizeAuditFilter,
+  type AuditFetchReply,
+} from "@/lib/purchase-report-inquiry";
 
 
 // ----- Route --------------------------------------------------------------
