@@ -488,7 +488,7 @@ export function CompactReportHeader({
 
 // ----- Dimension views (3-8) ----------------------------------------------
 
-function DimensionView({ view, report }: { view: DimensionKey; report: ReportData }) {
+export function DimensionView({ view, report }: { view: DimensionKey; report: ReportData }) {
   const spec = DIMENSION_SPECS[view];
   const rows = useMemo(() => groupByDimension(report.lines, view), [report.lines, view]);
   const totals = useMemo(() => totalOf(rows), [rows]);
@@ -704,7 +704,7 @@ function DimensionDrillPanel({
 
 // ----- View 1: Purchase Audit Trail ---------------------------------------
 
-function AuditTrailView({
+export function AuditTrailView({
   loading,
   error,
   data,
@@ -903,7 +903,7 @@ function AuditReconcileHeader({
 
 // ----- View 2: Posting Account Summary ------------------------------------
 
-function PostingAccountView({
+export function PostingAccountView({
   loading,
   error,
   data,
@@ -1080,7 +1080,7 @@ function Td({
 // PI Number link. When we know the immutable N3 invoice id, render a link
 // into /purchase-invoices/{id}/edit. Otherwise show the number as plain
 // text with a tooltip so the operator understands why it isn't clickable.
-function PILink({ invoiceId, docCode }: { invoiceId: string; docCode: string }) {
+export function PILink({ invoiceId, docCode }: { invoiceId: string; docCode: string }) {
   if (!invoiceId) {
     return (
       <span title="Edit link unavailable (no N3 invoice id in the current inquiry)">
