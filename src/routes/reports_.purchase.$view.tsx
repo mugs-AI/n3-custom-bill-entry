@@ -49,33 +49,56 @@ import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
 
 // ----- Route --------------------------------------------------------------
 
-type ViewId =
+export type ViewId =
   | "audit-trail"
   | "posting-account"
   | DimensionKey;
 
-const VIEW_META: Record<ViewId, { title: string; blurb: string }> = {
+export const VIEW_META: Record<ViewId, { title: string; navLabel: string; blurb: string }> = {
   "audit-trail": {
     title: "Purchase Audit Trail",
+    navLabel: "Purchase Audit Trail",
     blurb:
       "Every Purchase Invoice with its supplier creditor line and every reconciled GL posting per document.",
   },
   "posting-account": {
     title: "Posting Account Summary",
+    navLabel: "Posting Account Summary",
     blurb: "GL Debit and Credit totals per posting account for the current audit set.",
   },
-  wbs: { title: "Summary of WBS", blurb: "Live totals grouped by WBS / Stock." },
+  wbs: {
+    title: "Summary of WBS — N3 Stock Codes",
+    navLabel: "WBS",
+    blurb: "Live totals grouped by WBS / Stock.",
+  },
   "hq-sequence": {
-    title: "Summary of HQ Sequence",
+    title: "Summary of HQ Sequence — N3 Purchase Description",
+    navLabel: "HQ Sequence",
     blurb: "Live totals grouped by HQ Sequence (Purchase Invoice description).",
   },
-  "cost-centre": { title: "Summary of Cost Centre", blurb: "Live totals grouped by Cost Centre / Project." },
-  "order-number": { title: "Summary of Order Number", blurb: "Live totals grouped by Order No. / Tariff Code." },
-  "payment-type": { title: "Summary of Payment Type", blurb: "Live totals grouped by Payment Type / Purchaser." },
-  "hq-tax": { title: "Summary of HQ Tax", blurb: "Live totals grouped by HQ Tax / Input Tax Code." },
+  "cost-centre": {
+    title: "Summary of Cost Centre — N3 Project Codes",
+    navLabel: "Cost Centre",
+    blurb: "Live totals grouped by Cost Centre / Project.",
+  },
+  "order-number": {
+    title: "Summary of Order Number — N3 Tariff Codes",
+    navLabel: "Order Number",
+    blurb: "Live totals grouped by Order No. / Tariff Code.",
+  },
+  "payment-type": {
+    title: "Summary of Payment Type — N3 Purchaser",
+    navLabel: "Payment Type",
+    blurb: "Live totals grouped by Payment Type / Purchaser.",
+  },
+  "hq-tax": {
+    title: "Summary of HQ Tax — N3 SST Tax Codes",
+    navLabel: "HQ Tax",
+    blurb: "Live totals grouped by HQ Tax / Input Tax Code.",
+  },
 };
 
-const VIEW_IDS: ViewId[] = [
+export const VIEW_IDS: ViewId[] = [
   "audit-trail",
   "posting-account",
   "wbs",
@@ -85,6 +108,10 @@ const VIEW_IDS: ViewId[] = [
   "payment-type",
   "hq-tax",
 ];
+
+export function isAccountingView(v: ViewId): boolean {
+  return v === "audit-trail" || v === "posting-account";
+}
 
 export const Route = createFileRoute("/reports_/purchase/$view")({
   head: ({ params }) => {
