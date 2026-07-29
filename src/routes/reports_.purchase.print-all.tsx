@@ -390,7 +390,7 @@ function PrintAllPage() {
                   />
                 )}
                 {!isAccountingView(id) && (
-                  <DimensionView view={id} report={cached} />
+                  <DimensionView view={id as Exclude<ViewId, "audit-trail" | "posting-account">} report={cached} />
                 )}
               </div>
             </section>
