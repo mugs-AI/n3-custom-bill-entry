@@ -938,7 +938,7 @@ function PostingAccountView({
   const notEvaluated = result.balanceStatus === "not-evaluated";
   return (
     <div className="space-y-3">
-      <AuditReconcileHeader result={result} data={data} />
+      
       {notEvaluated && (
         <div className="app-card border-l-4 border-l-destructive p-3 text-sm">
           Posting Account Summary was not evaluated: no GL rows matched the current Purchase Invoice set.
