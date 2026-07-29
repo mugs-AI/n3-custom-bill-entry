@@ -740,7 +740,6 @@ function AuditTrailView({
   if (!data || !result) return null;
   return (
     <div className="space-y-3">
-      <AuditReconcileHeader result={result} data={data} />
       {result.documents.length === 0 ? (
         <div className="app-card p-6 text-sm text-muted-foreground">
           No documents in the audit set.
