@@ -263,19 +263,10 @@ function PurchaseReportPage() {
   // changes the fingerprint and therefore the cache key.
   const auditFingerprint = useMemo(() => computeAuditFingerprint(cached), [cached]);
   const authScope = useMemo(() => (hydrated ? getAuthScope() : { tenantId: "", userId: "" }), [hydrated]);
-  const normalizedFilter = useMemo(() => {
-    if (!inquiry) return null;
-    return {
-      dateFrom: inquiry.filter.dateFrom,
-      dateTo: inquiry.filter.dateTo,
-      supplierId: inquiry.filter.supplierId ?? null,
-      purchaserId: inquiry.filter.purchaserId ?? null,
-      projectId: inquiry.filter.projectId ?? null,
-      stockId: inquiry.filter.stockId ?? null,
-      taxCodeId: inquiry.filter.taxCodeId ?? null,
-      hqSequence: (inquiry.filter.hqSequence ?? "").trim() || null,
-    };
-  }, [inquiry]);
+  const normalizedFilter = useMemo(
+    () => (inquiry ? normalizeAuditFilter(inquiry.filter) : null),
+    [inquiry],
+  );
 
   const auditQ = useQuery<AuditFetchReply, Error>({
     queryKey: [
