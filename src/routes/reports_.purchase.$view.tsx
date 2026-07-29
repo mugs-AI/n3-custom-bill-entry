@@ -392,7 +392,7 @@ function ReportNav({ current }: { current: ViewId }) {
               : "text-muted-foreground hover:bg-surface hover:text-foreground"
           }`}
         >
-          {VIEW_META[id].title.replace(/^Summary of /, "")}
+          {VIEW_META[id].navLabel}
         </Link>
       ))}
     </div>
