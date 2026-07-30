@@ -19,10 +19,11 @@
 //     no /api/reports/purchase-audit request is made at all.
 
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
+import { usePrintReport } from "@/hooks/use-report-print-settings";
 import { getAuthScope } from "@/lib/draft-store";
 import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
 import { canonicalDocCode } from "@/lib/report-keys";
@@ -77,6 +78,8 @@ function PrintAllPage() {
   const hydrated = useHydrated();
   const token = useAuthToken();
   const queryClient = useQueryClient();
+  const reportRootRef = useRef<HTMLDivElement | null>(null);
+  const { print, preparingPrint, styleVars } = usePrintReport(reportRootRef);
 
   const [selected, setSelected] = useState<Set<ViewId>>(() => new Set(VIEW_IDS));
   const [step, setStep] = useState<"select" | "preview">("select");
@@ -291,7 +294,11 @@ function PrintAllPage() {
 
   return (
     <AppShell>
-      <div className="space-y-3 print-all-container report-container">
+      <div
+        className="space-y-3 print-all-container report-container"
+        ref={reportRootRef}
+        style={styleVars}
+      >
         <div className="no-print flex flex-wrap items-end justify-between gap-2">
           <div>
             <h1 className="text-xl font-semibold tracking-tight">
@@ -310,10 +317,12 @@ function PrintAllPage() {
             <button
               type="button"
               className="app-btn app-btn-primary"
-              onClick={() => window.print()}
-              disabled={plan.hasAccounting && (auditLoading || !!auditError)}
+              onClick={() => void print()}
+              disabled={
+                preparingPrint || (plan.hasAccounting && (auditLoading || !!auditError))
+              }
             >
-              Print
+              {preparingPrint ? "Preparing print…" : "Print"}
             </button>
           </div>
         </div>

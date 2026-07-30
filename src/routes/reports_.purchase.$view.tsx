@@ -14,10 +14,12 @@
 //   between the two accounting views.
 
 import { createFileRoute, Link, useParams } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
+import { usePrintReport } from "@/hooks/use-report-print-settings";
+
 import { getAuthScope } from "@/lib/draft-store";
 import { isoToMy } from "@/lib/date-my";
 import { round2, sumTo2dp } from "@/lib/money";
@@ -149,6 +151,9 @@ function PurchaseReportPage() {
   const hydrated = useHydrated();
   const token = useAuthToken();
   const queryClient = useQueryClient();
+  const reportRootRef = useRef<HTMLDivElement | null>(null);
+  const { print, preparingPrint, styleVars } = usePrintReport(reportRootRef);
+
 
   const inquiry = useMemo(() => (hydrated ? loadInquiry() : null), [hydrated]);
 
@@ -293,7 +298,7 @@ function PurchaseReportPage() {
   // Header
   return (
     <AppShell>
-      <div className="space-y-3 report-container">
+      <div className="space-y-3 report-container" ref={reportRootRef} style={styleVars}>
         {/* Title stays visible in print (Task 1). */}
         <div className="print-keep-with-next">
           <h1 className="report-title text-xl font-semibold tracking-tight">
@@ -314,13 +319,15 @@ function PurchaseReportPage() {
               <button
                 type="button"
                 className="app-btn app-btn-primary"
-                onClick={() => window.print()}
+                onClick={() => void print()}
+                disabled={preparingPrint}
               >
-                Print
+                {preparingPrint ? "Preparing print…" : "Print"}
               </button>
             </>
           )}
         </div>
+
 
         <ReportNav current={viewId} />
 
@@ -419,72 +426,80 @@ export function CompactReportHeader({
   const targetPIs =
     auditData?.meta?.targetInvoiceCount ?? auditData?.meta?.piDocumentCount ?? 0;
   return (
-    <div className="app-card compact-report-header p-3 text-[12px] print-keep-with-next">
-      <div className="grid gap-2 md:grid-cols-3">
-        <div>
-          <div className="crh-label text-[10px] font-semibold uppercase text-muted-foreground">
-            Period
-          </div>
-          <div className="crh-value text-foreground">
-            {isoToMy(filter.dateFrom)} → {isoToMy(filter.dateTo)}
-          </div>
-        </div>
-        <div>
-          <div className="crh-label text-[10px] font-semibold uppercase text-muted-foreground">
-            Coverage
-          </div>
-          <div className="crh-value text-foreground">
-            {report.fetchedInvoiceCount} Purchase Invoice
-            {report.fetchedInvoiceCount === 1 ? "" : "s"} · {report.summary.lineCount} line
-            {report.summary.lineCount === 1 ? "" : "s"}
-          </div>
-        </div>
-        <div>
-          <div className="crh-label text-[10px] font-semibold uppercase text-muted-foreground">
-            GL Analysis totals (MYR)
-          </div>
-          <div className="crh-value tabular text-foreground">
-            Before {fmt(report.summary.beforeTax)} · Tax {fmt(report.summary.taxAmount)} · Incl{" "}
-            {fmt(report.summary.includingTax)}
-          </div>
-        </div>
+    <div className="app-card compact-report-header px-3 py-2 text-[12px] print-keep-with-next">
+      <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+        <Metric label="Period" value={`${isoToMy(filter.dateFrom)} → ${isoToMy(filter.dateTo)}`} />
+        <Metric
+          label="Coverage"
+          value={`${report.fetchedInvoiceCount} Purchase Invoice${
+            report.fetchedInvoiceCount === 1 ? "" : "s"
+          } · ${report.summary.lineCount} line${report.summary.lineCount === 1 ? "" : "s"}`}
+        />
+        <Metric
+          label="GL Analysis Totals (MYR)"
+          tabular
+          value={`Before ${fmt(report.summary.beforeTax)} · Tax ${fmt(
+            report.summary.taxAmount,
+          )} · Incl ${fmt(report.summary.includingTax)}`}
+        />
       </div>
       {audit && auditData && auditResult && (
-        <>
-          <div className="mt-2 grid gap-2 border-t border-border/60 pt-2 md:grid-cols-4">
-            <MiniStat label="Target PIs" value={String(targetPIs)} />
-            <MiniStat
-              label="Upstream requests"
-              value={String(auditData.meta?.upstreamRequestCount ?? 0)}
-            />
-            <MiniStat label="GL rows matched" value={String(auditResult.glRowsUsed)} />
-            <MiniStat
-              label="Documents reconciled"
-              value={String(auditResult.documents.length)}
-            />
-          </div>
-          {auditResult.docsWithoutGL.length > 0 && (
-            <div className="crh-warn mt-1.5 text-destructive">
-              {auditResult.docsWithoutGL.length} Purchase Invoice
-              {auditResult.docsWithoutGL.length === 1 ? "" : "s"} had no matching GL postings:{" "}
-              <span className="tabular">
-                {auditResult.docsWithoutGL.slice(0, 6).join(", ")}
-                {auditResult.docsWithoutGL.length > 6 ? "…" : ""}
-              </span>
-            </div>
-          )}
-          {auditResult.incompleteReasons.length > 0 && (
-            <ul className="crh-warn mt-1.5 list-disc pl-5 text-destructive">
-              {auditResult.incompleteReasons.map((r) => (
-                <li key={r}>{r}</li>
-              ))}
-            </ul>
-          )}
-        </>
+        <div className="mt-1 grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
+          <Metric label="Target PIs" tabular value={String(targetPIs)} />
+          <Metric
+            label="Upstream Requests"
+            tabular
+            value={String(auditData.meta?.upstreamRequestCount ?? 0)}
+          />
+          <Metric label="GL Rows Matched" tabular value={String(auditResult.glRowsUsed)} />
+          <Metric
+            label="Documents Reconciled"
+            tabular
+            value={String(auditResult.documents.length)}
+          />
+        </div>
+      )}
+      {audit && auditResult && auditResult.docsWithoutGL.length > 0 && (
+        <div className="crh-warn mt-1 text-destructive">
+          {auditResult.docsWithoutGL.length} Purchase Invoice
+          {auditResult.docsWithoutGL.length === 1 ? "" : "s"} had no matching GL postings:{" "}
+          <span className="tabular">
+            {auditResult.docsWithoutGL.slice(0, 6).join(", ")}
+            {auditResult.docsWithoutGL.length > 6 ? "…" : ""}
+          </span>
+        </div>
+      )}
+      {audit && auditResult && auditResult.incompleteReasons.length > 0 && (
+        <ul className="crh-warn mt-1 list-disc pl-5 text-destructive">
+          {auditResult.incompleteReasons.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
       )}
     </div>
   );
 }
+
+/** Inline label + value on one line (Correction G). */
+function Metric({
+  label,
+  value,
+  tabular,
+}: {
+  label: string;
+  value: string;
+  tabular?: boolean;
+}) {
+  return (
+    <div className="crh-metric flex items-baseline gap-1.5">
+      <span className="crh-label shrink-0 text-[10px] font-semibold uppercase text-muted-foreground">
+        {label}
+      </span>
+      <span className={`crh-value text-foreground ${tabular ? "tabular" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
 
 // ----- Dimension views (3-8) ----------------------------------------------
 
