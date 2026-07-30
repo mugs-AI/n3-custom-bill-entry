@@ -192,11 +192,69 @@
   header, nav, .no-print {
     display: none !important;
   }
+  /* --- Correction G: deterministic A4 print-width reset --- */
+  html,
+  body,
+  #root,
+  main,
+  .report-container,
+  .print-all-container,
+  .print-report-section,
+  .app-card {
+    box-sizing: border-box !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+  html,
+  body,
+  main,
+  .report-container,
+  .print-all-container,
+  .print-report-section {
+    width: 100% !important;
+    overflow: visible !important;
+  }
   main {
-    max-width: none !important;
     padding: 0 !important;
     margin: 0 !important;
   }
+  /* Screen-only horizontal scroll wrappers must not clip in print. */
+  .report-container .overflow-x-auto,
+  .print-all-container .overflow-x-auto,
+  .report-container [class*="overflow-x"],
+  .print-all-container [class*="overflow-x"] {
+    overflow: visible !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+  /* Cancel every screen-only Tailwind min-w-* on printable tables. */
+  .report-container table,
+  .print-all-container table,
+  .report-container table[class*="min-w-"],
+  .print-all-container table[class*="min-w-"] {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    table-layout: auto;
+  }
+  .report-container th,
+  .report-container td,
+  .print-all-container th,
+  .print-all-container td {
+    overflow-wrap: anywhere;
+    word-break: normal;
+    white-space: normal !important;
+  }
+  .report-container .tabular,
+  .print-all-container .tabular,
+  .report-container td.text-right,
+  .report-container th.text-right,
+  .print-all-container td.text-right,
+  .print-all-container th.text-right {
+    white-space: nowrap !important;
+    text-align: right;
+  }
+
   .app-card {
     border: 1px solid #999 !important;
     box-shadow: none !important;
@@ -258,29 +316,36 @@
     color: #444 !important;
     letter-spacing: 0.02em;
   }
+  .compact-report-header .crh-metric {
+    display: flex;
+    align-items: baseline;
+    gap: 1.5mm;
+  }
   .compact-report-header .crh-value {
     font-size: 8pt;
   }
+
   .compact-report-header .crh-warn {
     font-size: 7.5pt;
     color: #000 !important;
     font-weight: 600;
   }
 
-  /* Compact result tables. */
+  /* Compact result tables. User-configurable body size (default 7.5pt). */
   .report-container table,
   .print-all-container table {
-    font-size: 7.5pt;
+    font-size: var(--print-body-pt, 7.5pt);
     line-height: 1.15;
     border-collapse: collapse;
     width: 100%;
   }
   .report-container table th,
   .print-all-container table th {
-    font-size: 6.75pt;
+    font-size: var(--print-head-pt, 6.75pt);
     padding: 1mm 1.25mm !important;
     line-height: 1.15;
   }
+
   .report-container table td,
   .print-all-container table td {
     padding: 1mm 1.25mm !important;
