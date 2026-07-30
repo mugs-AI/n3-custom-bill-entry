@@ -72,7 +72,11 @@ describe("Correction F — compact print styling", () => {
   it("print CSS declares compact typography for reports", () => {
     const css = read("src/styles.css");
     expect(css).toMatch(/\.report-title[\s\S]{0,120}font-size:\s*13pt/);
-    expect(css).toMatch(/\.report-container[\s\S]*table[\s\S]{0,200}font-size:\s*7\.5pt/);
+    // Correction G: the body size is now user-configurable with a 7.5pt default.
+    expect(css).toMatch(
+      /\.report-container[\s\S]*table[\s\S]{0,200}font-size:\s*var\(--print-body-pt,\s*7\.5pt\)/,
+    );
+
   });
 });
 
