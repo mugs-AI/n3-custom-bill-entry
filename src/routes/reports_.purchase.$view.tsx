@@ -849,73 +849,6 @@ function AuditDocumentCard({ doc, invoiceId }: { doc: AuditDocument; invoiceId: 
   );
 }
 
-function AuditReconcileHeader({
-  result,
-  data,
-}: {
-  result: PurchaseAuditResult;
-  data: AuditFetchReply;
-}) {
-  const strategy = data.meta?.strategy;
-  const elapsed =
-    typeof data.meta?.elapsedMs === "number"
-      ? Math.max(1, Math.round(data.meta.elapsedMs / 100) / 10)
-      : null;
-  const targetPIs = data.meta?.targetInvoiceCount ?? data.meta?.piDocumentCount ?? 0;
-  const rowsMatched = data.meta?.rowsMatched ?? result.glRowsUsed;
-  return (
-    <div className="app-card p-3 text-[12px]">
-      <div className="grid gap-2 md:grid-cols-4">
-        <MiniStat label="Target PIs" value={String(targetPIs)} />
-        <MiniStat
-          label="Upstream requests"
-          value={String(data.meta?.upstreamRequestCount ?? 0)}
-        />
-        <MiniStat label="GL rows matched" value={String(result.glRowsUsed)} />
-        <MiniStat
-          label="Documents reconciled"
-          value={String(result.documents.length)}
-        />
-      </div>
-      {strategy && (
-        <div className="no-print mt-2 text-muted-foreground">
-          {strategy === "purchase-invoice-glposting" ? (
-            <>
-              Source: N3 Purchase Invoice Account Journal · {targetPIs} invoice
-              {targetPIs === 1 ? "" : "s"} · {rowsMatched} row
-              {rowsMatched === 1 ? "" : "s"}
-              {elapsed != null ? ` · ${elapsed}s` : ""}
-            </>
-          ) : (
-            <>
-              Source: N3 General Ledger fallback
-              {data.meta?.fallbackReason ? ` — ${data.meta.fallbackReason}` : ""}
-            </>
-          )}
-        </div>
-      )}
-      {result.docsWithoutGL.length > 0 && (
-        <div className="mt-2 text-destructive">
-          {result.docsWithoutGL.length} Purchase Invoice
-          {result.docsWithoutGL.length === 1 ? "" : "s"} had no matching GL
-          postings:{" "}
-          <span className="tabular">
-            {result.docsWithoutGL.slice(0, 6).join(", ")}
-            {result.docsWithoutGL.length > 6 ? "…" : ""}
-          </span>
-        </div>
-      )}
-      {result.incompleteReasons.length > 0 && (
-        <ul className="mt-2 list-disc pl-5 text-destructive">
-          {result.incompleteReasons.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
 // ----- View 2: Posting Account Summary ------------------------------------
 
 export function PostingAccountView({
@@ -1032,15 +965,6 @@ function TotalBox({
       >
         {value}
       </div>
-    </div>
-  );
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</div>
-      <div className="tabular font-semibold">{value}</div>
     </div>
   );
 }
