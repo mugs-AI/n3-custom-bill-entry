@@ -38,6 +38,8 @@ export function n3SupplierDetailKey(supplierId: number | null): readonly unknown
 export interface ResyncTarget {
   label: string;
   queryKey: readonly unknown[];
+  /** Present only for the eight approved master lists. */
+  dataset?: MasterDataset;
   /** Exact key match (default). Supplier detail matches by prefix. */
   exact?: boolean;
 }
@@ -53,6 +55,7 @@ export function resyncTargets(
   const targets: ResyncTarget[] = (Object.keys(N3_MASTER_KEYS) as MasterDataset[]).map((k) => ({
     label: N3_MASTER_LABELS[k],
     queryKey: N3_MASTER_KEYS[k],
+    dataset: k,
   }));
   if (opts.supplierId != null) {
     targets.push({ label: "Supplier details", queryKey: n3SupplierDetailKey(opts.supplierId) });
