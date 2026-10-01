@@ -10,6 +10,9 @@ import { MASTER_DATASET_COUNT, N3_MASTER_LABELS, type ResyncTarget } from "./n3-
 
 const MASTER_LABELS = new Set(Object.values(N3_MASTER_LABELS));
 
+/** BillForm listens for this event and immediately persists its current in-memory draft. */
+export const RESYNC_PERSIST_DRAFT_EVENT = "custom-bill-entry:resync-persist-draft";
+
 export interface ResyncQueryClient {
   refetchQueries(filters: {
     queryKey: readonly unknown[];
