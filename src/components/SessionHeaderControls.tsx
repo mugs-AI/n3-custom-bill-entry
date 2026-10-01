@@ -1,9 +1,14 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clearToken } from "@/lib/auth-store";
-import { clearAllDrafts, saveDraft, loadDraft } from "@/lib/draft-store";
+import { clearAllDrafts } from "@/lib/draft-store";
 import { resyncTargets, type ResyncTarget } from "@/lib/n3-master-keys";
-import { formatSyncedAt, runResync, type ResyncResult } from "@/lib/resync";
+import {
+  formatSyncedAt,
+  RESYNC_PERSIST_DRAFT_EVENT,
+  runResync,
+  type ResyncResult,
+} from "@/lib/resync";
 import { hasAnySessionInfo } from "@/lib/session-info";
 import { useSessionInfo } from "@/hooks/use-session-info";
 
@@ -45,12 +50,10 @@ export function SessionHeaderControls() {
       if (runningRef.current) return;
       runningRef.current = true;
       setBusy(true);
-      // Extra safeguard: persist the in-progress New Bill draft as-is.
-      try {
-        const draft = loadDraft("new");
-        if (draft) saveDraft(draft, "new");
-      } catch {
-        /* best effort */
+      // Extra safeguard: ask the mounted BillForm (new or edit) to persist
+      // its current in-memory state immediately before any refetch begins.
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event(RESYNC_PERSIST_DRAFT_EVENT));
       }
       try {
         const res = await runResync(
