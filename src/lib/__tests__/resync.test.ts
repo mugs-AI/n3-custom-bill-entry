@@ -134,6 +134,20 @@ describe("Correction H — re-sync allow-list", () => {
     expect(reportFn).toHaveBeenCalledTimes(1);
   });
 
+  it("fetches an approved master list even when its query is not mounted", async () => {
+    const client = makeClient();
+    const fetchSpy = vi.spyOn(client, "fetchQuery").mockResolvedValue(["term"]);
+    const refetchSpy = vi.spyOn(client, "refetchQueries");
+
+    const res = await runResync(client, [
+      { label: "Terms", queryKey: N3_MASTER_KEYS.terms, dataset: "terms" },
+    ]);
+
+    expect(res.ok).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(refetchSpy).not.toHaveBeenCalled();
+  });
+
   it("surfaces new options after a re-sync", async () => {
     const client = makeClient();
     let rows = [{ id: 1 }];
@@ -324,12 +338,24 @@ describe("Correction H — integration guardrails", () => {
     expect(form).toContain("{STALE_SELECTION_MESSAGE}");
   });
 
-  it("re-sync code has no N3 write client or token/draft clearing dependency", () => {
+  it("re-sync code uses only the approved read-only master endpoints", () => {
     const resync = read("src/lib/resync.ts");
-    expect(resync).not.toContain("n3Call");
+    const master = read("src/lib/n3-master-data.ts");
     expect(resync).not.toContain("clearToken");
     expect(resync).not.toContain("clearAllDrafts");
-    expect(resync).not.toContain("fetch(");
+    expect(master).not.toMatch(/method\s*:\s*["'](?:POST|PUT|PATCH|DELETE)/);
+    for (const endpoint of [
+      "api/Suppliers/List",
+      "api/Purchasers/Query",
+      "api/Terms/Query",
+      "api/Stocks/List",
+      "api/AccountCodes/Leaf/Query",
+      "api/Projects/Query",
+      "api/TaxCodes/InputTax/Query",
+      "api/TariffCodes/Query",
+    ]) {
+      expect(master).toContain(endpoint);
+    }
   });
 
   it("keeps the authenticated header responsive with explicit accessible controls", () => {
