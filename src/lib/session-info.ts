@@ -6,10 +6,10 @@
 //   GET api/Users/Current             -> signed-in user's display name, email
 //
 // N3 tenants differ in field casing/naming, so every field is resolved from a
-// small candidate list. The tenant ID must come from N3 authority: the company
-// profile's db/tenant code when present, otherwise the tenant claim inside the
-// N3-issued JWT. Nothing from this module ever carries the bearer token, the
-// raw JWT, API keys or a claims dump.
+// small candidate list. The stable tenant ID must come from the authenticated
+// N3 BasicInfo/current-user responses. Browser token claims are deliberately
+// not accepted as identity authority here. Nothing from this module ever
+// carries a bearer token, raw JWT, API key or claims dump.
 
 export interface SessionInfo {
   company: string | null;
@@ -87,33 +87,25 @@ const TENANT_KEYS = [
 const USER_KEYS = ["displayName", "fullName", "userName", "name", "loginName", "user", "userId"];
 const EMAIL_KEYS = ["email", "emailAddress", "userEmail"];
 
-const CLAIM_TENANT_KEYS = ["tid", "tenantId", "tenant_id", "dbcode", "dbCode", "dbId"];
-const CLAIM_USER_KEYS = ["name", "unique_name", "preferred_username", "given_name", "sub"];
-const CLAIM_EMAIL_KEYS = ["email"];
-
 function isEmailLike(v: string | null): boolean {
   return !!v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
 
 /**
- * Build the panel values from the company-profile response, the current-user
- * response and (only as a last resort for tenant/user) the N3-issued JWT
- * payload. Any source may be null / a failed request.
+ * Build the panel values only from authenticated N3 authority responses.
+ * Either response may be null when its endpoint is unavailable.
  */
 export function normalizeSessionInfo(input: {
   company?: unknown;
   user?: unknown;
-  claims?: Record<string, unknown> | null;
 }): SessionInfo {
   const company = unwrapIdentityPayload(input.company);
   const user = unwrapIdentityPayload(input.user);
-  const claims = input.claims ?? null;
 
   const companyName = pick(company, COMPANY_KEYS);
-  const tenantId =
-    pick(company, TENANT_KEYS) ?? pick(user, TENANT_KEYS) ?? pick(claims, CLAIM_TENANT_KEYS);
-  const loginUser = pick(user, USER_KEYS) ?? pick(claims, CLAIM_USER_KEYS);
-  const emailRaw = pick(user, EMAIL_KEYS) ?? pick(claims, CLAIM_EMAIL_KEYS);
+  const tenantId = pick(company, TENANT_KEYS) ?? pick(user, TENANT_KEYS);
+  const loginUser = pick(user, USER_KEYS);
+  const emailRaw = pick(user, EMAIL_KEYS);
 
   return {
     company: companyName,
