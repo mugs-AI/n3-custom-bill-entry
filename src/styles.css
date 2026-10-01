@@ -369,18 +369,23 @@
     page-break-inside: avoid;
   }
 
-  /* Print All: continuous sections — do NOT force a new page per report. */
+  /* Print All: every report starts on a fresh page. This prevents a report
+     heading being stranded at the bottom of the previous report's page. */
   .print-report-section {
     break-inside: auto;
-    page-break-before: auto;
-    margin-top: 3mm;
-    padding-top: 1.5mm;
-    border-top: 1px solid #bbb;
-  }
-  .print-report-section:first-of-type {
     margin-top: 0;
     padding-top: 0;
     border-top: 0;
+  }
+  .print-report-section + .print-report-section {
+    break-before: page;
+    page-break-before: always;
+  }
+  .print-section-heading {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    break-after: avoid-page;
+    page-break-after: avoid;
   }
 }
 
