@@ -583,7 +583,7 @@ function ReportsPage() {
 }
 
 const REPORT_LINKS: { view: string; label: string }[] = [
-  { view: "audit-trail", label: "Purchase Audit Trail" },
+  { view: "expenditure-audit", label: "Expenditure Audit Trail" },
   { view: "posting-account", label: "Posting Account Summary" },
   { view: "wbs", label: "Summary of WBS" },
   { view: "hq-sequence", label: "Summary of HQ Sequence" },
@@ -591,6 +591,7 @@ const REPORT_LINKS: { view: string; label: string }[] = [
   { view: "order-number", label: "Summary of Order Number" },
   { view: "payment-type", label: "Summary of Payment Type" },
   { view: "hq-tax", label: "Summary of HQ Tax" },
+  { view: "audit-trail", label: "Purchase Audit Trail" },
 ];
 
 function PurchaseReportLauncher() {
@@ -611,7 +612,7 @@ function PurchaseReportLauncher() {
           </Link>
         ))}
         <Link to="/reports/purchase/print-all" className="app-btn app-btn-primary text-[12px]">
-          Print All 8 Reports
+          Print All 9 Reports
         </Link>
       </div>
       <div className="mt-2 text-[11px] text-muted-foreground">
