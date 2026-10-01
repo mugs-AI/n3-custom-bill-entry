@@ -323,11 +323,11 @@ describe("Correction H — integration guardrails", () => {
 
   it("updates displayed line master labels from refreshed lists without overwriting typed descriptions", () => {
     const form = read("src/routes/index.tsx");
-    expect(form).toContain("resolveDisplayLabel(line.stockId");
-    expect(form).toContain("resolveDisplayLabel(line.glAccountId");
-    expect(form).toContain("resolveDisplayLabel(line.projectId");
-    expect(form).toContain("resolveDisplayLabel(line.taxCodeId");
-    expect(form).toContain("resolveDisplayLabel(\n              line.tariffCodeId");
+    expect(form).toMatch(/resolveDisplayLabel\(\s*line\.stockId/);
+    expect(form).toMatch(/resolveDisplayLabel\(\s*line\.glAccountId/);
+    expect(form).toMatch(/resolveDisplayLabel\(\s*line\.projectId/);
+    expect(form).toMatch(/resolveDisplayLabel\(\s*line\.taxCodeId/);
+    expect(form).toMatch(/resolveDisplayLabel\(\s*line\.tariffCodeId/);
     expect(form).toContain("itemDescriptionTouched: l.itemDescriptionTouched");
   });
 
