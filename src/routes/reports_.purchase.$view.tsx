@@ -46,6 +46,12 @@ import {
 import { canonicalDocCode } from "@/lib/report-keys";
 import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
 import {
+  buildExpenditureAuditRows,
+  buildExpenditurePostingSummary,
+  expenditureGrandTotal,
+  expenditurePostingTotals,
+} from "@/lib/expenditure-audit";
+import {
   fetchAudit,
   loadInquiry,
   normalizeAuditFilter,
@@ -56,11 +62,18 @@ import {
 // ----- Route --------------------------------------------------------------
 
 export type ViewId =
+  | "expenditure-audit"
   | "audit-trail"
   | "posting-account"
   | DimensionKey;
 
 export const VIEW_META: Record<ViewId, { title: string; navLabel: string; blurb: string }> = {
+  "expenditure-audit": {
+    title: "Expenditure Audit Trail",
+    navLabel: "Expenditure Audit Trail",
+    blurb:
+      "Old-system style expenditure listing from the current N3 Purchase Invoice inquiry, with posting-account summary.",
+  },
   "audit-trail": {
     title: "Purchase Audit Trail",
     navLabel: "Purchase Audit Trail",
@@ -105,7 +118,7 @@ export const VIEW_META: Record<ViewId, { title: string; navLabel: string; blurb:
 };
 
 export const VIEW_IDS: ViewId[] = [
-  "audit-trail",
+  "expenditure-audit",
   "posting-account",
   "wbs",
   "hq-sequence",
@@ -113,10 +126,11 @@ export const VIEW_IDS: ViewId[] = [
   "order-number",
   "payment-type",
   "hq-tax",
+  "audit-trail",
 ];
 
 export function isAccountingView(v: ViewId): boolean {
-  return v === "audit-trail" || v === "posting-account";
+  return v === "expenditure-audit" || v === "audit-trail" || v === "posting-account";
 }
 
 export const Route = createFileRoute("/reports_/purchase/$view")({
@@ -261,7 +275,7 @@ function PurchaseReportPage() {
   }, [cached]);
 
 
-  const isAccountingView = viewId === "audit-trail" || viewId === "posting-account";
+  const accountingView = isAccountingView(viewId);
 
   // Correction E §6: a stable audit fingerprint drawn from the current GL
   // Analysis data. Any change in an invoice's identity or accounting amount
@@ -281,7 +295,7 @@ function PurchaseReportPage() {
       normalizedFilter,
       auditFingerprint,
     ],
-    enabled: hydrated && !!token && !!cached && isAccountingView && piDocuments.length > 0,
+    enabled: hydrated && !!token && !!cached && accountingView && piDocuments.length > 0,
     queryFn: () => fetchAudit(inquiry!.filter, piDocuments),
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
@@ -314,7 +328,7 @@ function PurchaseReportPage() {
           {cached && (
             <>
               <Link to="/reports/purchase/print-all" className="app-btn">
-                Print All 8 Reports
+                Print All 9 Reports
               </Link>
               <button
                 type="button"
@@ -352,8 +366,18 @@ function PurchaseReportPage() {
             <CompactReportHeader
               filter={inquiry.filter}
               report={cached}
-              audit={isAccountingView ? { data: auditQ.data ?? null, result: auditResult } : undefined}
+              audit={accountingView ? { data: auditQ.data ?? null, result: auditResult } : undefined}
             />
+            {viewId === "expenditure-audit" && (
+              <ExpenditureAuditView
+                loading={auditQ.isPending && auditQ.fetchStatus !== "idle"}
+                error={auditQ.error ?? null}
+                report={cached}
+                result={auditResult}
+                piCount={piDocuments.length}
+                onRetry={() => auditQ.refetch()}
+              />
+            )}
             {viewId === "audit-trail" && (
               <AuditTrailView
                 loading={auditQ.isPending && auditQ.fetchStatus !== "idle"}
@@ -375,7 +399,7 @@ function PurchaseReportPage() {
                 onRetry={() => auditQ.refetch()}
               />
             )}
-            {!isAccountingView && <DimensionView view={viewId} report={cached} />}
+            {!accountingView && <DimensionView view={viewId} report={cached} />}
           </>
         )}
       </div>
@@ -500,6 +524,125 @@ function Metric({
   );
 }
 
+
+// ----- Expenditure Audit Trail -------------------------------------------
+
+export function ExpenditureAuditView({
+  loading,
+  error,
+  report,
+  result,
+  piCount,
+  onRetry,
+}: {
+  loading: boolean;
+  error: Error | null;
+  report: ReportData;
+  result: PurchaseAuditResult | null;
+  piCount: number;
+  onRetry: () => void;
+}) {
+  if (loading)
+    return (
+      <div className="app-card p-6 text-sm text-muted-foreground">
+        Loading Account Journals for {piCount} Purchase Invoice
+        {piCount === 1 ? "" : "s"}…
+      </div>
+    );
+  if (error)
+    return (
+      <ErrorCard
+        title="Incomplete Expenditure Audit Trail"
+        message={error.message}
+        onRetry={onRetry}
+      />
+    );
+
+  const rows = buildExpenditureAuditRows(report);
+  const summary = buildExpenditurePostingSummary(rows, result);
+  const totals = expenditurePostingTotals(summary);
+  const grandTotal = expenditureGrandTotal(rows);
+
+  return (
+    <div className="space-y-3">
+      <div className="app-card overflow-x-auto p-3 expenditure-audit-table">
+        <table className="w-full min-w-[1200px] text-left text-sm">
+          <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
+            <tr>
+              <Th>Doc #</Th>
+              <Th>Date</Th>
+              <Th>A/C #</Th>
+              <Th>Vendor&apos;s Name</Th>
+              <Th>Exp Ty</Th>
+              <Th>Cost Ctr</Th>
+              <Th>Charged To A/C</Th>
+              <Th>Description</Th>
+              <Th className="text-right">Amount</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <Td colSpan={9} className="text-center text-muted-foreground">
+                  No expenditure rows.
+                </Td>
+              </tr>
+            ) : (
+              rows.map((row) => (
+                <tr key={`${row.docCode}:${row.pos}`} className="border-t border-border/60">
+                  <Td className="font-medium">{row.docCode}</Td>
+                  <Td>{isoToMy(row.docDate)}</Td>
+                  <Td>{row.vendorAccount}</Td>
+                  <Td>{row.vendorName}</Td>
+                  <Td>{row.expenditureType}</Td>
+                  <Td>{row.costCentre}</Td>
+                  <Td>{row.chargedToAccount}</Td>
+                  <Td>{row.description}</Td>
+                  <Td className="tabular text-right">{fmt(row.amount)}</Td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+        <div className="mt-2 flex justify-end border-t border-border pt-2 text-sm">
+          <span className="mr-2 font-semibold">Grand Total: RM</span>
+          <span className="tabular min-w-28 text-right font-semibold">{fmt(grandTotal)}</span>
+        </div>
+      </div>
+
+      <div className="app-card overflow-x-auto p-3 expenditure-posting-summary">
+        <div className="mb-2 text-sm font-semibold">Summary of Posting Account</div>
+        <table className="w-full min-w-[720px] text-left text-sm">
+          <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
+            <tr>
+              <Th>Account</Th>
+              <Th>Account Name</Th>
+              <Th className="text-right">Debit</Th>
+              <Th className="text-right">Credit</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.map((row) => (
+              <tr key={`${row.accountCode}:${row.accountName}`} className="border-t border-border/60">
+                <Td className="font-medium">{row.accountCode}</Td>
+                <Td>{row.accountName}</Td>
+                <Td className="tabular text-right">{row.debit ? fmt(row.debit) : ""}</Td>
+                <Td className="tabular text-right">{row.credit ? fmt(row.credit) : ""}</Td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot className="bg-surface-2 text-[12px]">
+            <tr>
+              <Td colSpan={2} className="text-right font-semibold">Total</Td>
+              <Td className="tabular text-right font-semibold">{fmt(totals.debit)}</Td>
+              <Td className="tabular text-right font-semibold">{fmt(totals.credit)}</Td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 // ----- Dimension views (3-8) ----------------------------------------------
 
