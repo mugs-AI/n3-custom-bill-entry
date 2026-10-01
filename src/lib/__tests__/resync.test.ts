@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { QueryClient } from "@tanstack/react-query";
 import {
   MASTER_DATASET_COUNT,
@@ -255,7 +257,6 @@ describe("Correction H — session information", () => {
     const info = normalizeSessionInfo({
       company: { data: { companyName: "MUGS Sdn Bhd", dbCode: "MUGS01" } },
       user: { data: { userName: "admin", email: "admin@mugs.com.my", token: "secret-jwt" } },
-      claims: { tid: "MUGS01", sub: "u-1" },
     });
     expect(info.company).toBe("MUGS Sdn Bhd");
     expect(info.tenantId).toBe("MUGS01");
@@ -264,13 +265,12 @@ describe("Correction H — session information", () => {
     expect(JSON.stringify(info)).not.toContain("secret-jwt");
   });
 
-  it("falls back to JWT claims for the tenant and tolerates missing fields", () => {
+  it("does not invent identity when N3 authority responses are unavailable", () => {
     const info = normalizeSessionInfo({
       company: null,
       user: null,
-      claims: { dbcode: "T9" },
     });
-    expect(info.tenantId).toBe("T9");
+    expect(info.tenantId).toBeNull();
     expect(info.company).toBeNull();
     expect(info.loginUser).toBeNull();
   });
@@ -279,10 +279,67 @@ describe("Correction H — session information", () => {
     const info = normalizeSessionInfo({
       company: { value: [{ name: "Acme" }] },
       user: { value: [{ loginName: "jane", email: "not-an-email" }] },
-      claims: null,
     });
     expect(info.company).toBe("Acme");
     expect(info.loginUser).toBe("jane");
     expect(info.email).toBeNull();
+  });
+});
+
+describe("Correction H — integration guardrails", () => {
+  const read = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
+
+  it("forces the mounted new/edit BillForm to persist its current in-memory draft before refetch", () => {
+    const header = read("src/components/SessionHeaderControls.tsx");
+    const form = read("src/routes/index.tsx");
+    expect(header).toContain("RESYNC_PERSIST_DRAFT_EVENT");
+    expect(header).toContain("window.dispatchEvent(new Event(RESYNC_PERSIST_DRAFT_EVENT))");
+    expect(form).toContain("window.addEventListener(RESYNC_PERSIST_DRAFT_EVENT");
+    expect(form).toContain("saveDraft(draft, draftScope)");
+  });
+
+  it("does not use browser JWT claims as session-information authority", () => {
+    const hook = read("src/hooks/use-session-info.ts");
+    const normalizer = read("src/lib/session-info.ts");
+    expect(hook).not.toContain("decodeJwt");
+    expect(hook).not.toContain("getToken");
+    expect(normalizer).not.toContain("CLAIM_TENANT_KEYS");
+    expect(normalizer).not.toContain("claims?:");
+  });
+
+  it("updates displayed line master labels from refreshed lists without overwriting typed descriptions", () => {
+    const form = read("src/routes/index.tsx");
+    expect(form).toContain("resolveDisplayLabel(line.stockId");
+    expect(form).toContain("resolveDisplayLabel(line.glAccountId");
+    expect(form).toContain("resolveDisplayLabel(line.projectId");
+    expect(form).toContain("resolveDisplayLabel(line.taxCodeId");
+    expect(form).toContain("resolveDisplayLabel(\n              line.tariffCodeId");
+    expect(form).toContain("itemDescriptionTouched: l.itemDescriptionTouched");
+  });
+
+  it("shows stale line warnings immediately and only blocks save through validation", () => {
+    const form = read("src/routes/index.tsx");
+    expect(form).toContain("lineStale={lineStale}");
+    expect(form).toContain("const stale = !!ctx.lineStale.get(line.key)?.[id]");
+    expect(form).toContain("{STALE_SELECTION_MESSAGE}");
+  });
+
+  it("re-sync code has no N3 write client or token/draft clearing dependency", () => {
+    const resync = read("src/lib/resync.ts");
+    expect(resync).not.toContain("n3Call");
+    expect(resync).not.toContain("clearToken");
+    expect(resync).not.toContain("clearAllDrafts");
+    expect(resync).not.toContain("fetch(");
+  });
+
+  it("keeps the authenticated header responsive with explicit accessible controls", () => {
+    const shell = read("src/components/AppShell.tsx");
+    const header = read("src/components/SessionHeaderControls.tsx");
+    expect(shell).toContain("flex-wrap");
+    expect(shell).toContain("overflow-x-auto");
+    expect(header).toContain('aria-label="N3 session information"');
+    expect(header).toContain('aria-label="Re-sync N3 Data"');
+    expect(header).toContain('aria-label="Sign Out"');
+    expect(header).toContain('className="hidden sm:inline"');
   });
 });
