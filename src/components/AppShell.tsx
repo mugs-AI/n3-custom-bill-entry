@@ -1,7 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
-import { clearToken } from "@/lib/auth-store";
-import { clearAllDrafts } from "@/lib/draft-store";
+import { SessionHeaderControls } from "@/components/SessionHeaderControls";
 import { useAuthToken } from "@/hooks/use-auth";
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -14,7 +13,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-20 border-b border-border bg-surface/85 backdrop-blur">
-        <div className="mx-auto flex max-w-[1400px] items-center gap-6 px-6 py-3">
+        <div className="mx-auto flex max-w-[1400px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:gap-6 sm:px-6">
           <Link to="/" className="flex items-center gap-2">
             <span className="grid h-8 w-8 place-items-center rounded-md bg-primary text-primary-foreground font-bold">
               N3
@@ -24,33 +23,23 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="text-[11px] text-muted-foreground">N3 AI Cloud Accounting</div>
             </div>
           </Link>
-          <nav className="ml-4 flex items-center gap-1 text-sm">
+          <nav className="ml-0 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm sm:ml-4">
             <NavLink to="/">New Bill</NavLink>
             <NavLink to="/history">History</NavLink>
             <NavLink to="/reports">GL Analysis</NavLink>
             <NavLink to="/settings">Settings</NavLink>
           </nav>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             {isDev && (
               <Link
                 to="/dev-login"
-                className="rounded-md border border-warning/60 bg-warning/10 px-2 py-1 text-[11px] font-medium text-warning"
+                className="hidden rounded-md border border-warning/60 bg-warning/10 px-2 py-1 text-[11px] font-medium text-warning sm:inline-block"
               >
                 DEV
               </Link>
             )}
             {token ? (
-              <button
-                onClick={() => {
-                  if (confirm("Sign out of N3?")) {
-                    clearAllDrafts();
-                    clearToken();
-                  }
-                }}
-                className="app-btn"
-              >
-                Sign out
-              </button>
+              <SessionHeaderControls />
             ) : (
               isDev && (
                 <Link to="/dev-login" className="app-btn app-btn-primary">
