@@ -164,7 +164,7 @@ describe("Correction H — re-sync allow-list", () => {
     await seed(client, N3_MASTER_KEYS.projects, vi.fn().mockResolvedValue(keep));
     const failing: ResyncQueryClient = {
       refetchQueries: async (filters) => {
-        if (JSON.stringify(filters.queryKey) === JSON.stringify(N3_MASTER_KEYS.projects)) {
+        if (JSON.stringify(filters?.queryKey) === JSON.stringify(N3_MASTER_KEYS.projects)) {
           throw new Error("network down");
         }
         return client.refetchQueries(filters);
