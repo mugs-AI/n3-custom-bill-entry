@@ -6,6 +6,7 @@
 // Entry keeps every value the user typed. Failures are per-dataset: a list
 // that fails keeps its last successfully cached data.
 
+import { fetchMasterDataset } from "./n3-master-data";
 import { MASTER_DATASET_COUNT, N3_MASTER_LABELS, type ResyncTarget } from "./n3-master-keys";
 
 const MASTER_LABELS = new Set(Object.values(N3_MASTER_LABELS));
@@ -14,6 +15,11 @@ const MASTER_LABELS = new Set(Object.values(N3_MASTER_LABELS));
 export const RESYNC_PERSIST_DRAFT_EVENT = "custom-bill-entry:resync-persist-draft";
 
 export interface ResyncQueryClient {
+  fetchQuery?(options: {
+    queryKey: readonly unknown[];
+    queryFn: (context: { signal: AbortSignal }) => Promise<unknown>;
+    staleTime?: number;
+  }): Promise<unknown>;
   refetchQueries(filters: {
     queryKey: readonly unknown[];
     exact: boolean;
@@ -73,12 +79,22 @@ export async function runResync(
   const settled = await Promise.all(
     targets.map(async (t) => {
       try {
-        await client.refetchQueries({
-          queryKey: t.queryKey,
-          exact: t.exact !== false,
-          type: "all",
-          throwOnError: true,
-        });
+        if (t.dataset && client.fetchQuery) {
+          // Unlike refetchQueries, fetchQuery also works when the target query
+          // has not been mounted in the current route yet.
+          await client.fetchQuery({
+            queryKey: t.queryKey,
+            queryFn: ({ signal }) => fetchMasterDataset(t.dataset!, signal),
+            staleTime: 0,
+          });
+        } else {
+          await client.refetchQueries({
+            queryKey: t.queryKey,
+            exact: t.exact !== false,
+            type: "all",
+            throwOnError: true,
+          });
+        }
         return { t, err: null as unknown };
       } catch (err) {
         return { t, err: err ?? new Error("Refresh failed") };
