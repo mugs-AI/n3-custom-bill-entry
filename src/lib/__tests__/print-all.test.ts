@@ -25,13 +25,13 @@ describe("Correction F — routing & selection plan", () => {
     expect(tree).toMatch(/ReportsPurchasePrintAll/);
   });
 
-  it("All 8 views are pre-selected by default", () => {
+  it("All 9 views are pre-selected by default", () => {
     const src = read("src/routes/reports_.purchase.print-all.tsx");
     expect(src).toContain("new Set(VIEW_IDS)");
   });
 
   it("selectionPlan flags zero-selection as invalid and blocks accounting fetch", () => {
-    const empty = selectionPlan<string>([], ["audit-trail", "posting-account"]);
+    const empty = selectionPlan<string>([], ["expenditure-audit", "audit-trail", "posting-account"]);
     expect(empty.isValid).toBe(false);
     expect(empty.hasAccounting).toBe(false);
   });
@@ -39,18 +39,18 @@ describe("Correction F — routing & selection plan", () => {
   it("selectionPlan detects when only dimension reports are selected (audit stays disabled)", () => {
     const dims = selectionPlan<string>(
       ["wbs", "hq-tax"],
-      ["audit-trail", "posting-account"],
+      ["expenditure-audit", "audit-trail", "posting-account"],
     );
     expect(dims.isValid).toBe(true);
     expect(dims.hasAccounting).toBe(false);
   });
 
   it("selectionPlan detects any accounting selection triggers a single audit fetch", () => {
-    const a = selectionPlan<string>(["posting-account"], ["audit-trail", "posting-account"]);
+    const a = selectionPlan<string>(["expenditure-audit"], ["expenditure-audit", "audit-trail", "posting-account"]);
     expect(a.hasAccounting).toBe(true);
     const b = selectionPlan<string>(
       ["audit-trail", "posting-account", "wbs"],
-      ["audit-trail", "posting-account"],
+      ["expenditure-audit", "audit-trail", "posting-account"],
     );
     expect(b.hasAccounting).toBe(true);
     expect(b.count).toBe(3);
@@ -69,6 +69,12 @@ describe("Correction F — compact print styling", () => {
     expect(css).toMatch(/thead\s*{\s*display:\s*table-header-group/);
   });
 
+  it("starts every Print All report after the first on a fresh printed page", () => {
+    const css = read("src/styles.css");
+    expect(css).toMatch(/\.print-report-section \+ \.print-report-section[\s\S]{0,180}break-before:\s*page/);
+    expect(css).toMatch(/page-break-before:\s*always/);
+    expect(css).toMatch(/\.print-section-heading[\s\S]{0,180}break-after:\s*avoid-page/);
+  });
   it("print CSS declares compact typography for reports", () => {
     const css = read("src/styles.css");
     expect(css).toMatch(/\.report-title[\s\S]{0,120}font-size:\s*13pt/);
@@ -100,10 +106,24 @@ describe("Correction F — shared header + report titles", () => {
   });
 });
 
+describe("Nine-report selection UI", () => {
+  it("places Expenditure Audit Trail first and Purchase Audit Trail last", () => {
+    const view = read("src/routes/reports_.purchase.$view.tsx");
+    expect(view).toMatch(/VIEW_IDS:[\s\S]{0,300}"expenditure-audit"[\s\S]{0,300}"hq-tax",[\s\S]{0,80}"audit-trail"/);
+  });
+
+  it("offers accessible Up/Down ordering controls and tenant persistence", () => {
+    const src = read("src/routes/reports_.purchase.print-all.tsx");
+    expect(src).toContain("loadPurchaseReportPrintLayout");
+    expect(src).toContain("savePurchaseReportPrintLayout");
+    expect(src).toContain("Move ${VIEW_META[id].title} up");
+    expect(src).toContain("Move ${VIEW_META[id].title} down");
+  });
+});
 describe("Correction F — GL Analysis launcher entry point", () => {
   it("PurchaseReportLauncher links to the Print All route", () => {
     const src = read("src/routes/reports.tsx");
     expect(src).toContain("/reports/purchase/print-all");
-    expect(src).toMatch(/Print All 8 Reports/);
+    expect(src).toMatch(/Print All 9 Reports/);
   });
 });
