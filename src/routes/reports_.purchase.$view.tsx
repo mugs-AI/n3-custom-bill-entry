@@ -399,7 +399,7 @@ function PurchaseReportPage() {
                 onRetry={() => auditQ.refetch()}
               />
             )}
-            {!accountingView && <DimensionView view={viewId} report={cached} />}
+            {!accountingView && <DimensionView view={viewId as DimensionKey} report={cached} />}
           </>
         )}
       </div>
