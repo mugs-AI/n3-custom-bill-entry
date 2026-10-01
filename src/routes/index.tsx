@@ -21,6 +21,8 @@ import {
   type DraftLine,
 } from "@/lib/draft-store";
 import { HISTORY_QUERY_KEY } from "@/lib/history-query";
+import { N3_MASTER_KEYS, n3SupplierDetailKey } from "@/lib/n3-master-keys";
+import { isStaleSelection, STALE_SELECTION_MESSAGE } from "@/lib/master-sync";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -379,53 +381,53 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
   );
 
   const suppliersQ = useQuery({
-    queryKey: ["n3", "suppliers"],
+    queryKey: N3_MASTER_KEYS.suppliers,
     queryFn: ({ signal }) =>
       n3ListAll<SupplierList>("api/Suppliers/List", { pageSize: 500, signal }),
     staleTime: 60_000,
     retry: noRetryOn401,
   });
   const purchasersQ = useQuery({
-    queryKey: ["n3", "purchasers"],
+    queryKey: N3_MASTER_KEYS.purchasers,
     queryFn: ({ signal }) =>
       n3ListAll<Purchaser>("api/Purchasers/Query", { pageSize: 500, signal }),
     staleTime: 60_000,
     retry: noRetryOn401,
   });
   const termsQ = useQuery({
-    queryKey: ["n3", "terms"],
+    queryKey: N3_MASTER_KEYS.terms,
     queryFn: ({ signal }) => n3ListAll<Term>("api/Terms/Query", { pageSize: 500, signal }),
     staleTime: 5 * 60_000,
     retry: noRetryOn401,
   });
   const stocksQ = useQuery({
-    queryKey: ["n3", "stocks"],
+    queryKey: N3_MASTER_KEYS.stocks,
     queryFn: ({ signal }) => n3ListAll<StockListRow>("api/Stocks/List", { pageSize: 500, signal }),
     staleTime: 5 * 60_000,
     retry: noRetryOn401,
   });
   const glAccountsQ = useQuery({
-    queryKey: ["n3", "glAccounts"],
+    queryKey: N3_MASTER_KEYS.glAccounts,
     queryFn: ({ signal }) =>
       n3ListAll<AccountCode>("api/AccountCodes/Leaf/Query", { pageSize: 500, signal }),
     staleTime: 5 * 60_000,
     retry: noRetryOn401,
   });
   const projectsQ = useQuery({
-    queryKey: ["n3", "projects"],
+    queryKey: N3_MASTER_KEYS.projects,
     queryFn: ({ signal }) => n3ListAll<Project>("api/Projects/Query", { pageSize: 500, signal }),
     staleTime: 5 * 60_000,
     retry: noRetryOn401,
   });
   const taxCodesQ = useQuery({
-    queryKey: ["n3", "taxCodes"],
+    queryKey: N3_MASTER_KEYS.taxCodes,
     queryFn: ({ signal }) =>
       n3ListAll<TaxCode>("api/TaxCodes/InputTax/Query", { pageSize: 500, signal }),
     staleTime: 5 * 60_000,
     retry: noRetryOn401,
   });
   const tariffCodesQ = useQuery({
-    queryKey: ["n3", "tariffCodes"],
+    queryKey: N3_MASTER_KEYS.tariffCodes,
     queryFn: ({ signal }) =>
       n3ListAll<TariffCode>("api/TariffCodes/Query", { pageSize: 500, signal }),
     staleTime: 5 * 60_000,
@@ -433,7 +435,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
   });
 
   const supplierDetailQ = useQuery({
-    queryKey: ["n3", "supplier", supplierId],
+    queryKey: n3SupplierDetailKey(supplierId),
     queryFn: ({ signal }) => n3Call<SupplierDetail>(`api/Suppliers/${supplierId}`, { signal }),
     enabled: supplierId != null,
     staleTime: 30_000,
@@ -552,6 +554,77 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
       label: `${r.code ?? ""} — ${r.description ?? ""}`.trim(),
     }));
   }, [tariffCodesQ.data, sortByCode, dedupe]);
+
+  // Correction H §3: after a re-sync a previously selected N3 record may no
+  // longer be active. The selection is never silently cleared — it is flagged
+  // and blocks Save until the user picks another record.
+  const supplierStale = isStaleSelection(
+    supplierId != null ? String(supplierId) : null,
+    supplierOptions,
+    !suppliersQ.isLoading && !!suppliersQ.data,
+  );
+  const purchaserStale = isStaleSelection(
+    purchaserId != null ? String(purchaserId) : null,
+    purchaserOptions,
+    !purchasersQ.isLoading && !!purchasersQ.data,
+  );
+  const termStale = isStaleSelection(
+    termId != null ? String(termId) : null,
+    termOptions,
+    !termsQ.isLoading && !!termsQ.data,
+  );
+  const lineStale = useMemo(() => {
+    const stocksLoaded = !stocksQ.isLoading && !!stocksQ.data;
+    const glLoaded = !glAccountsQ.isLoading && !!glAccountsQ.data;
+    const projLoaded = !projectsQ.isLoading && !!projectsQ.data;
+    const taxLoaded = !taxCodesQ.isLoading && !!taxCodesQ.data;
+    const tariffLoaded = !tariffCodesQ.isLoading && !!tariffCodesQ.data;
+    const map = new Map<string, Partial<Record<FieldId, boolean>>>();
+    for (const l of lines) {
+      map.set(l.key, {
+        wbs: isStaleSelection(
+          l.stockId != null ? String(l.stockId) : null,
+          stockOptions,
+          stocksLoaded,
+        ),
+        glAccount: isStaleSelection(l.glAccountId, glOptions, glLoaded),
+        costCentre: isStaleSelection(
+          l.projectId != null ? String(l.projectId) : null,
+          projectOptions,
+          projLoaded,
+        ),
+        hqTax: isStaleSelection(
+          l.taxCodeId != null ? String(l.taxCodeId) : null,
+          taxOptions,
+          taxLoaded,
+        ),
+        orderNo: isStaleSelection(
+          l.tariffCodeId != null ? String(l.tariffCodeId) : null,
+          tariffOptions,
+          tariffLoaded,
+        ),
+      });
+    }
+    return map;
+  }, [
+    lines,
+    stockOptions,
+    glOptions,
+    projectOptions,
+    taxOptions,
+    tariffOptions,
+    stocksQ.isLoading,
+    stocksQ.data,
+    glAccountsQ.isLoading,
+    glAccountsQ.data,
+    projectsQ.isLoading,
+    projectsQ.data,
+    taxCodesQ.isLoading,
+    taxCodesQ.data,
+    tariffCodesQ.isLoading,
+    tariffCodesQ.data,
+  ]);
+
 
   const listSupplier = useMemo<SupplierList | null>(() => {
     if (supplierId == null) return null;
@@ -914,6 +987,13 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
     if (supplierId == null) {
       errors.push("Supplier is required.");
       invalid.push("supplier");
+    } else if (supplierStale) {
+      errors.push(`Supplier: ${STALE_SELECTION_MESSAGE}`);
+      invalid.push("supplier");
+    }
+    if (purchaserStale) {
+      errors.push(`Payment Type (Purchaser): ${STALE_SELECTION_MESSAGE}`);
+      invalid.push("purchaser");
     }
     if (!docDate || !/^\d{4}-\d{2}-\d{2}$/.test(docDate)) {
       errors.push("Document Date is required.");
@@ -921,6 +1001,9 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
     }
     if (termId == null) {
       errors.push("Term is required.");
+      invalid.push("term");
+    } else if (termStale) {
+      errors.push(`Term: ${STALE_SELECTION_MESSAGE}`);
       invalid.push("term");
     }
     if (supplierInvNo.trim().length === 0) {
@@ -957,9 +1040,25 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
       if (l.tariffCodeId == null) push("orderNo", "Order No. / Tariff is required.");
       if (!(Number(l.qty) > 0)) push("qty", "Qty must be greater than 0.");
       if (!(Number(l.unitPrice) >= 0)) push("unitPrice", "Unit Price must be ≥ 0.");
+      const stale = lineStale.get(l.key);
+      if (stale) {
+        for (const id of ["wbs", "glAccount", "costCentre", "hqTax", "orderNo"] as FieldId[]) {
+          if (stale[id]) push(id, STALE_SELECTION_MESSAGE);
+        }
+      }
     }
     return { errors, invalidFields: invalid };
-  }, [supplierId, docDate, termId, supplierInvNo, lines]);
+  }, [
+    supplierId,
+    docDate,
+    termId,
+    supplierInvNo,
+    lines,
+    supplierStale,
+    purchaserStale,
+    termStale,
+    lineStale,
+  ]);
 
   const focusField = useCallback((id: string) => {
     if (typeof document === "undefined") return;
@@ -1234,13 +1333,18 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
                 Loading full supplier details…
               </p>
             )}
+            {supplierStale && (
+              <p className="mt-1 text-[11px] text-warning" role="alert">
+                {STALE_SELECTION_MESSAGE}
+              </p>
+            )}
           </div>
 
           <div className="md:col-span-2">
             <label className="app-label">Supplier Name</label>
             <input className="app-input" readOnly value={supplierName} />
           </div>
-          <div>
+          <div data-field="purchaser">
             <label className="app-label">Payment Type (Purchaser)</label>
             <SearchableSelect
               options={purchaserOptions}
@@ -1256,6 +1360,11 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
               }
               ariaLabel="Purchaser"
             />
+            {purchaserStale && (
+              <p className="mt-1 text-[11px] text-warning" role="alert">
+                {STALE_SELECTION_MESSAGE}
+              </p>
+            )}
           </div>
 
           <div className="md:col-span-2">
@@ -1304,6 +1413,11 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
               }
               ariaLabel="Term"
             />
+            {termStale && (
+              <p className="mt-1 text-[11px] text-warning" role="alert">
+                {STALE_SELECTION_MESSAGE}
+              </p>
+            )}
           </div>
 
           <div>
