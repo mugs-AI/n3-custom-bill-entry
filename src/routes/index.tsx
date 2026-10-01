@@ -22,7 +22,8 @@ import {
 } from "@/lib/draft-store";
 import { HISTORY_QUERY_KEY } from "@/lib/history-query";
 import { N3_MASTER_KEYS, n3SupplierDetailKey } from "@/lib/n3-master-keys";
-import { isStaleSelection, STALE_SELECTION_MESSAGE } from "@/lib/master-sync";
+import { isStaleSelection, resolveDisplayLabel, STALE_SELECTION_MESSAGE } from "@/lib/master-sync";
+import { RESYNC_PERSIST_DRAFT_EVENT } from "@/lib/resync";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -821,8 +822,9 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
   };
 
   // ==================== Draft persistence (sessionStorage) ================
-  // Save whenever anything the user typed/selected changes.
-  useEffect(() => {
+  // Save whenever anything the user typed/selected changes, and expose the
+  // same exact snapshot writer to the header re-sync control.
+  const persistDraftNow = useCallback(() => {
     if (save.status === "success") return; // do not resurrect a saved bill
     const draft: BillDraft = {
       schemaVersion: 2,
@@ -893,6 +895,17 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
     invoiceId,
     editedDocCode,
   ]);
+
+  useEffect(() => {
+    persistDraftNow();
+  }, [persistDraftNow]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const persist = () => persistDraftNow();
+    window.addEventListener(RESYNC_PERSIST_DRAFT_EVENT, persist);
+    return () => window.removeEventListener(RESYNC_PERSIST_DRAFT_EVENT, persist);
+  }, [persistDraftNow]);
 
   // If the auth scope shifts (tenant/user swap) while this page is mounted,
   // drop the old draft key we captured at mount so it doesn't linger.
@@ -1487,6 +1500,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
         lineNet={lineNet}
         lineTax={lineTax}
         invalidFields={invalidFields}
+        lineStale={lineStale}
         stockOptions={stockOptions}
         stocksLoading={stocksQ.isLoading}
         glOptions={glOptions}
@@ -1611,6 +1625,7 @@ interface LineCtx {
   lineNet: (l: DetailLine) => number;
   lineTax: (l: DetailLine) => number;
   invalidFields: Set<string>;
+  lineStale: Map<string, Partial<Record<FieldId, boolean>>>;
 }
 
 function LineList({
@@ -1842,17 +1857,30 @@ function FieldCell({
 
   const fieldKey = `line:${line.key}:${id}`;
   const isInvalid = ctx.invalidFields.has(fieldKey);
+  const stale = !!ctx.lineStale.get(line.key)?.[id];
 
   const wrap = (widthClass: string, content: React.ReactNode) => (
     <div
-      className={`${widthClass} ${isInvalid ? "rounded-md ring-2 ring-destructive/60 ring-offset-1" : ""}`}
+      className={`${widthClass} ${
+        stale
+          ? "rounded-md ring-2 ring-warning/60 ring-offset-1"
+          : isInvalid
+            ? "rounded-md ring-2 ring-destructive/60 ring-offset-1"
+            : ""
+      }`}
       data-field={fieldKey}
     >
       <div className="mb-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
         {FIELD_LABELS[id]}
       </div>
       {content}
-      {error && <FieldError text={error} />}
+      {stale ? (
+        <p className="mt-0.5 text-[10px] font-medium text-warning" role="alert">
+          {STALE_SELECTION_MESSAGE}
+        </p>
+      ) : (
+        error && <FieldError text={error} />
+      )}
     </div>
   );
 
@@ -1870,7 +1898,7 @@ function FieldCell({
           options={ctx.stockOptions}
           loading={ctx.stocksLoading}
           value={line.stockId != null ? String(line.stockId) : null}
-          selectedLabel={line.stockId ? `${line.stockCode} — ${line.stockName}`.trim() : ""}
+          selectedLabel={resolveDisplayLabel(line.stockId, ctx.stockOptions, line.stockId ? `${line.stockCode} — ${line.stockName}`.trim() : "")}
           onChange={(o) => ctx.onStockSelect(line, o)}
           placeholder={ctx.stocksLoading ? "Loading…" : "Select WBS"}
           ariaLabel={`WBS line ${index + 1}`}
@@ -1903,9 +1931,11 @@ function FieldCell({
           options={ctx.glOptions}
           loading={ctx.glLoading}
           value={line.glAccountId ?? null}
-          selectedLabel={
-            line.glAccountId ? `${line.glAccountCode} — ${line.glAccountName}`.trim() : ""
-          }
+          selectedLabel={resolveDisplayLabel(
+            line.glAccountId,
+            ctx.glOptions,
+            line.glAccountId ? `${line.glAccountCode} — ${line.glAccountName}`.trim() : "",
+          )}
           onChange={(o) => ctx.onGlSelect(line, o)}
           placeholder={ctx.glLoading ? "Loading…" : "Select GL"}
           ariaLabel={`GL Account line ${index + 1}`}
@@ -1932,7 +1962,7 @@ function FieldCell({
           options={ctx.projectOptions}
           loading={ctx.projectsLoading}
           value={line.projectId != null ? String(line.projectId) : null}
-          selectedLabel={line.projectId ? `${line.projectCode} — ${line.projectName}`.trim() : ""}
+          selectedLabel={resolveDisplayLabel(line.projectId, ctx.projectOptions, line.projectId ? `${line.projectCode} — ${line.projectName}`.trim() : "")}
           onChange={(o) => {
             if (!o) {
               onChange(line.key, { projectId: null, projectCode: "", projectName: "" });
@@ -1959,7 +1989,7 @@ function FieldCell({
           options={ctx.taxOptions}
           loading={ctx.taxLoading}
           value={line.taxCodeId != null ? String(line.taxCodeId) : null}
-          selectedLabel={line.taxCodeId ? `${line.taxCodeCode} — ${line.taxCodeName}`.trim() : ""}
+          selectedLabel={resolveDisplayLabel(line.taxCodeId, ctx.taxOptions, line.taxCodeId ? `${line.taxCodeCode} — ${line.taxCodeName}`.trim() : "")}
           onChange={(o) => {
             if (!o) {
               onChange(line.key, { taxCodeId: null, taxCodeCode: "", taxCodeName: "" });
@@ -1989,9 +2019,11 @@ function FieldCell({
             options={ctx.tariffOptions}
             loading={ctx.tariffLoading}
             value={line.tariffCodeId != null ? String(line.tariffCodeId) : null}
-            selectedLabel={
-              line.tariffCodeId ? `${line.tariffCodeCode} — ${line.tariffCodeName}`.trim() : ""
-            }
+            selectedLabel={resolveDisplayLabel(
+              line.tariffCodeId,
+              ctx.tariffOptions,
+              line.tariffCodeId ? `${line.tariffCodeCode} — ${line.tariffCodeName}`.trim() : "",
+            )}
             onChange={(o) => {
               if (!o) {
                 onChange(line.key, { tariffCodeId: null, tariffCodeCode: "", tariffCodeName: "" });
