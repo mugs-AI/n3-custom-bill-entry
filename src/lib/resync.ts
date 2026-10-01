@@ -80,12 +80,14 @@ export async function runResync(
             staleTime: 0,
           });
         } else {
-          await client.refetchQueries({
-            queryKey: t.queryKey,
-            exact: t.exact !== false,
-            type: "all",
-            throwOnError: true,
-          });
+          await client.refetchQueries(
+            {
+              queryKey: t.queryKey,
+              exact: t.exact !== false,
+              type: "all",
+            },
+            { throwOnError: true },
+          );
         }
         return { t, err: null as unknown };
       } catch (err) {
