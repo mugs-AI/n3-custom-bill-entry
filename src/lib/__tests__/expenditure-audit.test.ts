@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   buildExpenditureAuditRows,
   buildExpenditurePostingSummary,
@@ -248,5 +250,29 @@ describe("Expenditure Audit Trail", () => {
     r.lines[0] = { ...r.lines[0], beforeTax: 100, taxAmount: 6, includingTax: 106 };
     const rows = buildExpenditureAuditRows(r);
     expect(rows[0].amount).toBe(100);
+  });
+});
+
+
+describe("Expenditure Audit Trail UI guardrails", () => {
+  it("renders the old-system style heading and DD/MM/YYYY date labels", () => {
+    const src = readFileSync(
+      resolve(process.cwd(), "src/routes/reports_.purchase.$view.tsx"),
+      "utf8",
+    );
+    expect(src).toContain("EXPENDITURE AUDIT TRAIL BY");
+    expect(src).toContain("Order By Date");
+    expect(src).toContain("Date From");
+    expect(src).toContain("Date To");
+    expect(src).toContain('timeZone: "Asia/Kuala_Lumpur"');
+  });
+
+  it("warns rather than silently presenting a zero-tax customization for taxable data", () => {
+    const src = readFileSync(
+      resolve(process.cwd(), "src/routes/reports_.purchase.$view.tsx"),
+      "utf8",
+    );
+    expect(src).toContain("const taxDetected = Math.abs(report.summary.taxAmount)");
+    expect(src).toContain("configured for zero-tax transactions only");
   });
 });
