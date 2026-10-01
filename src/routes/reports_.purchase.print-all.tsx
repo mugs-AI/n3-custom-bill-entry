@@ -416,27 +416,29 @@ function PrintAllPage() {
               className={`print-report-section ${isFirst ? "" : "mt-6"}`}
               aria-label={meta.title}
             >
-              <div className="print-section-heading">
-                <div className="print-keep-with-next">
-                  <h2 className="report-title text-lg font-semibold tracking-tight">
-                    {meta.title}
-                  </h2>
-                  <p className="report-subtitle text-sm text-muted-foreground">
-                    {meta.blurb}
-                  </p>
+              {id !== "expenditure-audit" && (
+                <div className="print-section-heading">
+                  <div className="print-keep-with-next">
+                    <h2 className="report-title text-lg font-semibold tracking-tight">
+                      {meta.title}
+                    </h2>
+                    <p className="report-subtitle text-sm text-muted-foreground">
+                      {meta.blurb}
+                    </p>
+                  </div>
+                  <div className="mt-2">
+                    <CompactReportHeader
+                      filter={inquiry.filter}
+                      report={cached}
+                      audit={
+                        isAccountingView(id)
+                          ? { data: auditQ.data ?? null, result: auditResult }
+                          : undefined
+                      }
+                    />
+                  </div>
                 </div>
-                <div className="mt-2">
-                  <CompactReportHeader
-                    filter={inquiry.filter}
-                    report={cached}
-                    audit={
-                      isAccountingView(id)
-                        ? { data: auditQ.data ?? null, result: auditResult }
-                        : undefined
-                    }
-                  />
-                </div>
-              </div>
+              )}
               <div className="mt-2">
                 {id === "expenditure-audit" && (
                   <ExpenditureAuditView
