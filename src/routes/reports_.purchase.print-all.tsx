@@ -1,8 +1,8 @@
-// Phase 3B Correction F Task 5 — "Print All 8 Reports" preview & print
+// Purchase Reports — "Print All 9 Reports" preview & print
 // interface.
 //
 // Two-step flow:
-//   1. Selection step (default on entry): all 8 reports pre-checked. The
+//   1. Selection step (default on entry): all 9 reports pre-checked. The
 //      user can uncheck any and click "Prepare Print Preview".
 //   2. Preview step: renders every selected report, in the canonical order,
 //      as continuous flow content — no forced page break per report. The
@@ -25,6 +25,10 @@ import { AppShell } from "@/components/AppShell";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
 import { usePrintReport } from "@/hooks/use-report-print-settings";
 import { getAuthScope } from "@/lib/draft-store";
+import {
+  loadPurchaseReportPrintLayout,
+  savePurchaseReportPrintLayout,
+} from "@/lib/purchase-report-layout";
 import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
 import { canonicalDocCode } from "@/lib/report-keys";
 import {
@@ -44,6 +48,7 @@ import {
 import {
   AuditTrailView,
   CompactReportHeader,
+  ExpenditureAuditView,
   DimensionView,
   isAccountingView,
   PostingAccountView,
@@ -55,24 +60,24 @@ import {
 export const Route = createFileRoute("/reports_/purchase/print-all")({
   head: () => ({
     meta: [
-      { title: "Print All 8 Purchase Reports · Custom Bill Entry" },
+      { title: "Print All 9 Purchase Reports · Custom Bill Entry" },
       {
         name: "description",
         content:
-          "Print all 8 Purchase Reports for the current GL Analysis inquiry as one continuous document.",
+          "Print all 9 Purchase Reports for the current GL Analysis inquiry as one continuous document.",
       },
-      { property: "og:title", content: "Print All 8 Purchase Reports · Custom Bill Entry" },
+      { property: "og:title", content: "Print All 9 Purchase Reports · Custom Bill Entry" },
       {
         property: "og:description",
         content:
-          "Print all 8 Purchase Reports for the current GL Analysis inquiry as one continuous document.",
+          "Print all 9 Purchase Reports for the current GL Analysis inquiry as one continuous document.",
       },
     ],
   }),
   component: PrintAllPage,
 });
 
-const ACCOUNTING_IDS: ViewId[] = ["audit-trail", "posting-account"];
+const ACCOUNTING_IDS: ViewId[] = ["expenditure-audit", "audit-trail", "posting-account"];
 
 function PrintAllPage() {
   const hydrated = useHydrated();
@@ -82,7 +87,25 @@ function PrintAllPage() {
   const { print, preparingPrint, styleVars } = usePrintReport(reportRootRef);
 
   const [selected, setSelected] = useState<Set<ViewId>>(() => new Set(VIEW_IDS));
+  const [order, setOrder] = useState<ViewId[]>(() => [...VIEW_IDS]);
+  const [preferencesReady, setPreferencesReady] = useState(false);
   const [step, setStep] = useState<"select" | "preview">("select");
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const saved = loadPurchaseReportPrintLayout(VIEW_IDS);
+    setOrder(saved.order);
+    setSelected(new Set(saved.selected));
+    setPreferencesReady(true);
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (!preferencesReady) return;
+    savePurchaseReportPrintLayout(
+      { schemaVersion: 1, order, selected: order.filter((id) => selected.has(id)) },
+      VIEW_IDS,
+    );
+  }, [order, preferencesReady, selected]);
 
   const inquiry = useMemo(() => (hydrated ? loadInquiry() : null), [hydrated]);
 
@@ -193,6 +216,16 @@ function PrintAllPage() {
   function clearAll() {
     setSelected(new Set());
   }
+  function move(id: ViewId, delta: -1 | 1) {
+    setOrder((prev) => {
+      const from = prev.indexOf(id);
+      const to = from + delta;
+      if (from < 0 || to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      [next[from], next[to]] = [next[to], next[from]];
+      return next;
+    });
+  }
 
   if (!hydrated || !token) {
     return (
@@ -226,7 +259,7 @@ function PrintAllPage() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">Print All 8 Reports</h1>
+              <h1 className="text-xl font-semibold tracking-tight">Print All 9 Reports</h1>
               <p className="text-sm text-muted-foreground">
                 Choose which reports to include. Unchecked reports are absent from the
                 preview and are never printed.
@@ -251,20 +284,46 @@ function PrintAllPage() {
                 {plan.count} of {VIEW_IDS.length} selected
               </span>
             </div>
-            <ul className="grid gap-1.5 sm:grid-cols-2">
-              {VIEW_IDS.map((id) => (
-                <li key={id}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded border border-border/60 bg-surface px-2 py-1.5 text-sm hover:bg-surface-2">
+            <ul className="space-y-1.5">
+              {order.map((id, index) => (
+                <li
+                  key={id}
+                  className="flex items-center gap-2 rounded border border-border/60 bg-surface px-2 py-1.5 text-sm"
+                >
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
                     <input
                       type="checkbox"
                       checked={selected.has(id)}
                       onChange={() => toggle(id)}
                     />
-                    <span className="font-medium">{VIEW_META[id].title}</span>
+                    <span className="min-w-0 font-medium">{VIEW_META[id].title}</span>
                   </label>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      className="app-btn px-2 py-1 text-[11px]"
+                      disabled={index === 0}
+                      onClick={() => move(id, -1)}
+                      aria-label={`Move ${VIEW_META[id].title} up`}
+                    >
+                      ↑ Up
+                    </button>
+                    <button
+                      type="button"
+                      className="app-btn px-2 py-1 text-[11px]"
+                      disabled={index === order.length - 1}
+                      onClick={() => move(id, 1)}
+                      aria-label={`Move ${VIEW_META[id].title} down`}
+                    >
+                      ↓ Down
+                    </button>
+                  </div>
                 </li>
               ))}
             </ul>
+            <div className="mt-2 text-[11px] text-muted-foreground">
+              Report order and tick selections are saved for this N3 tenant on this browser.
+            </div>
             <div className="mt-3 flex items-center gap-2">
               <button
                 type="button"
@@ -286,7 +345,7 @@ function PrintAllPage() {
     );
   }
 
-  const orderedSelection = VIEW_IDS.filter((id) => selected.has(id));
+  const orderedSelection = order.filter((id) => selected.has(id));
 
   const auditLoading =
     plan.hasAccounting && auditQ.isPending && auditQ.fetchStatus !== "idle";
@@ -357,26 +416,38 @@ function PrintAllPage() {
               className={`print-report-section ${isFirst ? "" : "mt-6"}`}
               aria-label={meta.title}
             >
-              <div className="print-keep-with-next">
-                <h2 className="report-title text-lg font-semibold tracking-tight">
-                  {meta.title}
-                </h2>
-                <p className="report-subtitle text-sm text-muted-foreground">
-                  {meta.blurb}
-                </p>
+              <div className="print-section-heading">
+                <div className="print-keep-with-next">
+                  <h2 className="report-title text-lg font-semibold tracking-tight">
+                    {meta.title}
+                  </h2>
+                  <p className="report-subtitle text-sm text-muted-foreground">
+                    {meta.blurb}
+                  </p>
+                </div>
+                <div className="mt-2">
+                  <CompactReportHeader
+                    filter={inquiry.filter}
+                    report={cached}
+                    audit={
+                      isAccountingView(id)
+                        ? { data: auditQ.data ?? null, result: auditResult }
+                        : undefined
+                    }
+                  />
+                </div>
               </div>
               <div className="mt-2">
-                <CompactReportHeader
-                  filter={inquiry.filter}
-                  report={cached}
-                  audit={
-                    isAccountingView(id)
-                      ? { data: auditQ.data ?? null, result: auditResult }
-                      : undefined
-                  }
-                />
-              </div>
-              <div className="mt-2">
+                {id === "expenditure-audit" && (
+                  <ExpenditureAuditView
+                    loading={auditLoading}
+                    error={auditError ?? null}
+                    report={cached}
+                    result={auditResult}
+                    piCount={piDocuments.length}
+                    onRetry={() => auditQ.refetch()}
+                  />
+                )}
                 {id === "audit-trail" && (
                   <AuditTrailView
                     loading={auditLoading}
@@ -399,7 +470,10 @@ function PrintAllPage() {
                   />
                 )}
                 {!isAccountingView(id) && (
-                  <DimensionView view={id as Exclude<ViewId, "audit-trail" | "posting-account">} report={cached} />
+                  <DimensionView
+                    view={id as Exclude<ViewId, "expenditure-audit" | "audit-trail" | "posting-account">}
+                    report={cached}
+                  />
                 )}
               </div>
             </section>
