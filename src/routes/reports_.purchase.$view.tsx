@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
+import { useSessionInfo } from "@/hooks/use-session-info";
 import { usePrintReport } from "@/hooks/use-report-print-settings";
 
 import { getAuthScope } from "@/lib/draft-store";
@@ -313,13 +314,15 @@ function PurchaseReportPage() {
   return (
     <AppShell>
       <div className="space-y-3 report-container" ref={reportRootRef} style={styleVars}>
-        {/* Title stays visible in print (Task 1). */}
-        <div className="print-keep-with-next">
-          <h1 className="report-title text-xl font-semibold tracking-tight">
-            {meta.title}
-          </h1>
-          <p className="report-subtitle text-sm text-muted-foreground">{meta.blurb}</p>
-        </div>
+        {/* Expenditure Audit renders its legacy-style report header inside the view. */}
+        {viewId !== "expenditure-audit" && (
+          <div className="print-keep-with-next">
+            <h1 className="report-title text-xl font-semibold tracking-tight">
+              {meta.title}
+            </h1>
+            <p className="report-subtitle text-sm text-muted-foreground">{meta.blurb}</p>
+          </div>
+        )}
 
         <div className="no-print flex flex-wrap items-end justify-end gap-2">
           <Link to="/reports" className="app-btn">
@@ -363,11 +366,13 @@ function PurchaseReportPage() {
           </div>
         ) : (
           <>
-            <CompactReportHeader
-              filter={inquiry.filter}
-              report={cached}
-              audit={accountingView ? { data: auditQ.data ?? null, result: auditResult } : undefined}
-            />
+            {viewId !== "expenditure-audit" && (
+              <CompactReportHeader
+                filter={inquiry.filter}
+                report={cached}
+                audit={accountingView ? { data: auditQ.data ?? null, result: auditResult } : undefined}
+              />
+            )}
             {viewId === "expenditure-audit" && (
               <ExpenditureAuditView
                 loading={auditQ.isPending && auditQ.fetchStatus !== "idle"}
@@ -525,6 +530,22 @@ function Metric({
 }
 
 
+function formatMalaysiaDateTime(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kuala_Lumpur",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  }).formatToParts(now);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")}:${get("second")} ${get("dayPeriod")}`;
+}
+
 // ----- Expenditure Audit Trail -------------------------------------------
 
 export function ExpenditureAuditView({
@@ -542,6 +563,9 @@ export function ExpenditureAuditView({
   piCount: number;
   onRetry: () => void;
 }) {
+  const sessionQ = useSessionInfo();
+  const taxDetected = Math.abs(report.summary.taxAmount) >= 0.005;
+
   if (loading)
     return (
       <div className="app-card p-6 text-sm text-muted-foreground">
@@ -565,6 +589,32 @@ export function ExpenditureAuditView({
 
   return (
     <div className="space-y-3">
+      <div className="expenditure-legacy-header print-keep-with-next">
+        <div className="grid gap-3 text-[12px] md:grid-cols-3">
+          <div>
+            <div className="font-medium">Order By Date</div>
+            <div className="mt-3 grid grid-cols-[auto_1fr] gap-x-2">
+              <span>Date From</span><span>: [ {isoToMy(report.criteria.dateFrom)} ]</span>
+              <span>Date To</span><span>: [ {isoToMy(report.criteria.dateTo)} ]</span>
+            </div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-semibold">{sessionQ.data?.company || "N3"}</div>
+            <div className="text-xl font-semibold tracking-tight">EXPENDITURE AUDIT TRAIL BY</div>
+          </div>
+          <div className="text-right">
+            <div className="tabular">{formatMalaysiaDateTime()}</div>
+            <div className="mt-1 font-medium">{sessionQ.data?.loginUser || ""}</div>
+          </div>
+        </div>
+      </div>
+
+      {taxDetected && (
+        <div className="rounded-md border border-warning/50 bg-warning/10 p-3 text-sm font-medium text-warning" role="alert">
+          Taxable Purchase Invoice data was detected. This client-specific Expenditure Audit Trail is configured for zero-tax transactions only. Do not rely on its expenditure/posting summary until a taxable version is separately customised.
+        </div>
+      )}
+
       <div className="app-card overflow-x-auto p-3 expenditure-audit-table">
         <table className="w-full min-w-[1200px] text-left text-sm">
           <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
