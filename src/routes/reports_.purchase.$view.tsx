@@ -352,29 +352,6 @@ function PurchaseReportPage() {
               <Link to="/reports/purchase/print-all" className="app-btn">
                 Print All 10 Reports
               </Link>
-              {viewId === "advanced-expenditure-audit" && auditResult && (
-                <button
-                  type="button"
-                  className="app-btn"
-                  onClick={() => {
-                    const rows = buildAdvancedExpenditureAuditRows(cached, auditResult);
-                    const xml = buildAdvancedExpenditureExcelXml(rows);
-                    const blob = new Blob([xml], {
-                      type: "application/vnd.ms-excel;charset=utf-8",
-                    });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url;
-                    a.download = `AEAT_${cached.criteria.dateFrom}_to_${cached.criteria.dateTo}.xls`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    URL.revokeObjectURL(url);
-                  }}
-                >
-                  Export Excel
-                </button>
-              )}
               <button
                 type="button"
                 className="app-btn app-btn-primary"
@@ -763,6 +740,8 @@ export function AdvancedExpenditureAuditView({
   piCount: number;
   onRetry: () => void;
 }) {
+  const [breakdownCreditSide, setBreakdownCreditSide] = useState(true);
+
   if (loading) {
     return (
       <div className="app-card p-6 text-sm text-muted-foreground">
@@ -788,16 +767,45 @@ export function AdvancedExpenditureAuditView({
     );
   }
 
-  const rows = buildAdvancedExpenditureAuditRows(report, result);
+  const rows = buildAdvancedExpenditureAuditRows(report, result, { breakdownCreditSide });
   const totals = advancedExpenditureTotals(rows);
+
+  const exportExcel = () => {
+    const xml = buildAdvancedExpenditureExcelXml(rows);
+    const blob = new Blob([xml], {
+      type: "application/vnd.ms-excel;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `AEAT_${report.criteria.dateFrom}_to_${report.criteria.dateTo}.xls`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="app-card overflow-x-auto p-3">
-      <div className="mb-2 text-[11px] text-muted-foreground">
-        Grouping: G/L Account + Item Text + Cost Center + WBS Element + Tax Code.
-        Jurisdiction and Order Number are intentionally blank. Profit Center repeats Cost Center.
+      <div className="no-print mb-3 flex flex-wrap items-center justify-between gap-2">
+        <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium">
+          <input
+            type="checkbox"
+            checked={breakdownCreditSide}
+            onChange={(e) => setBreakdownCreditSide(e.target.checked)}
+          />
+          Breakdown credit side
+        </label>
+        <button type="button" className="app-btn" onClick={exportExcel}>
+          Export Excel
+        </button>
       </div>
-      <table className="w-full min-w-[1500px] text-left text-sm aeat-table">
+      <div className="mb-2 text-[11px] text-muted-foreground">
+        Template alignment: B:N. Company Code is 1000. Company/local currency amount columns,
+        Tax Jurisdiction and Order Number are intentionally blank. Profit Center repeats Cost Center.
+        Breakdown credit side is ON by default.
+      </div>
+      <table className="w-full min-w-[1900px] text-left text-sm aeat-table">
         <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
           <tr>
             {AEAT_EXCEL_COLUMNS.map((column) => (
@@ -823,10 +831,13 @@ export function AdvancedExpenditureAuditView({
                 key={`${row.glAccount}:${row.itemText}:${row.costCenter}:${row.wbsElement}:${row.taxCode}:${index}`}
                 className="border-t border-border/60"
               >
+                <Td>{row.companyCode}</Td>
                 <Td className="font-medium">{row.glAccount}</Td>
                 <Td>{row.itemText}</Td>
                 <Td className="tabular text-right">{row.debit ? fmt(row.debit) : ""}</Td>
                 <Td className="tabular text-right">{row.credit ? fmt(row.credit) : ""}</Td>
+                <Td>{row.companyCurrencyAmount}</Td>
+                <Td>{row.secondLocalCurrencyAmount}</Td>
                 <Td>{row.taxCode}</Td>
                 <Td>{row.jurisdiction}</Td>
                 <Td>{row.costCenter}</Td>
@@ -839,10 +850,10 @@ export function AdvancedExpenditureAuditView({
         </tbody>
         <tfoot className="bg-surface-2 text-[12px]">
           <tr>
-            <Td colSpan={2} className="text-right font-semibold">Total</Td>
+            <Td colSpan={3} className="text-right font-semibold">Total</Td>
             <Td className="tabular text-right font-semibold">{fmt(totals.debit)}</Td>
             <Td className="tabular text-right font-semibold">{fmt(totals.credit)}</Td>
-            <Td colSpan={6} />
+            <Td colSpan={8} />
           </tr>
         </tfoot>
       </table>
