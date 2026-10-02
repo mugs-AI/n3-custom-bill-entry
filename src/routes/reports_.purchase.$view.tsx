@@ -47,6 +47,12 @@ import {
 import { canonicalDocCode } from "@/lib/report-keys";
 import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
 import {
+  AEAT_EXCEL_COLUMNS,
+  advancedExpenditureTotals,
+  buildAdvancedExpenditureAuditRows,
+  buildAdvancedExpenditureExcelXml,
+} from "@/lib/advanced-expenditure-audit";
+import {
   buildExpenditureAuditRows,
   buildExpenditurePostingSummary,
   expenditureGrandTotal,
@@ -64,6 +70,7 @@ import {
 
 export type ViewId =
   | "expenditure-audit"
+  | "advanced-expenditure-audit"
   | "audit-trail"
   | "posting-account"
   | DimensionKey;
@@ -74,6 +81,12 @@ export const VIEW_META: Record<ViewId, { title: string; navLabel: string; blurb:
     navLabel: "Expenditure Audit Trail",
     blurb:
       "Old-system style expenditure listing from the current N3 Purchase Invoice inquiry, with posting-account summary.",
+  },
+  "advanced-expenditure-audit": {
+    title: "Advanced Expenditure Audit Trail",
+    navLabel: "AEAT",
+    blurb:
+      "Advanced posting extract grouped for the client's Excel journal template.",
   },
   "audit-trail": {
     title: "Purchase Audit Trail",
@@ -128,10 +141,16 @@ export const VIEW_IDS: ViewId[] = [
   "payment-type",
   "hq-tax",
   "audit-trail",
+  "advanced-expenditure-audit",
 ];
 
 export function isAccountingView(v: ViewId): boolean {
-  return v === "expenditure-audit" || v === "audit-trail" || v === "posting-account";
+  return (
+    v === "expenditure-audit" ||
+    v === "advanced-expenditure-audit" ||
+    v === "audit-trail" ||
+    v === "posting-account"
+  );
 }
 
 export const Route = createFileRoute("/reports_/purchase/$view")({
@@ -331,8 +350,31 @@ function PurchaseReportPage() {
           {cached && (
             <>
               <Link to="/reports/purchase/print-all" className="app-btn">
-                Print All 9 Reports
+                Print All 10 Reports
               </Link>
+              {viewId === "advanced-expenditure-audit" && auditResult && (
+                <button
+                  type="button"
+                  className="app-btn"
+                  onClick={() => {
+                    const rows = buildAdvancedExpenditureAuditRows(cached, auditResult);
+                    const xml = buildAdvancedExpenditureExcelXml(rows);
+                    const blob = new Blob([xml], {
+                      type: "application/vnd.ms-excel;charset=utf-8",
+                    });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `AEAT_${cached.criteria.dateFrom}_to_${cached.criteria.dateTo}.xls`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  Export Excel
+                </button>
+              )}
               <button
                 type="button"
                 className="app-btn app-btn-primary"
@@ -375,6 +417,16 @@ function PurchaseReportPage() {
             )}
             {viewId === "expenditure-audit" && (
               <ExpenditureAuditView
+                loading={auditQ.isPending && auditQ.fetchStatus !== "idle"}
+                error={auditQ.error ?? null}
+                report={cached}
+                result={auditResult}
+                piCount={piDocuments.length}
+                onRetry={() => auditQ.refetch()}
+              />
+            )}
+            {viewId === "advanced-expenditure-audit" && (
+              <AdvancedExpenditureAuditView
                 loading={auditQ.isPending && auditQ.fetchStatus !== "idle"}
                 error={auditQ.error ?? null}
                 report={cached}
@@ -690,6 +742,110 @@ export function ExpenditureAuditView({
           </tfoot>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ----- Advanced Expenditure Audit Trail ----------------------------------
+
+export function AdvancedExpenditureAuditView({
+  loading,
+  error,
+  report,
+  result,
+  piCount,
+  onRetry,
+}: {
+  loading: boolean;
+  error: Error | null;
+  report: ReportData;
+  result: PurchaseAuditResult | null;
+  piCount: number;
+  onRetry: () => void;
+}) {
+  if (loading) {
+    return (
+      <div className="app-card p-6 text-sm text-muted-foreground">
+        Loading Account Journals for {piCount} Purchase Invoice
+        {piCount === 1 ? "" : "s"}…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <ErrorCard
+        title="Incomplete Advanced Expenditure Audit Trail"
+        message={error.message}
+        onRetry={onRetry}
+      />
+    );
+  }
+  if (!result) {
+    return (
+      <div className="app-card p-6 text-sm text-muted-foreground">
+        No reconciled accounting rows are available for AEAT.
+      </div>
+    );
+  }
+
+  const rows = buildAdvancedExpenditureAuditRows(report, result);
+  const totals = advancedExpenditureTotals(rows);
+
+  return (
+    <div className="app-card overflow-x-auto p-3">
+      <div className="mb-2 text-[11px] text-muted-foreground">
+        Grouping: G/L Account + Item Text + Cost Center + WBS Element + Tax Code.
+        Jurisdiction and Order Number are intentionally blank. Profit Center repeats Cost Center.
+      </div>
+      <table className="w-full min-w-[1500px] text-left text-sm aeat-table">
+        <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
+          <tr>
+            {AEAT_EXCEL_COLUMNS.map((column) => (
+              <Th
+                key={column}
+                className={column === "Debit" || column === "Credit" ? "text-right" : ""}
+              >
+                {column}
+              </Th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <Td colSpan={AEAT_EXCEL_COLUMNS.length} className="text-center text-muted-foreground">
+                No AEAT rows.
+              </Td>
+            </tr>
+          ) : (
+            rows.map((row, index) => (
+              <tr
+                key={`${row.glAccount}:${row.itemText}:${row.costCenter}:${row.wbsElement}:${row.taxCode}:${index}`}
+                className="border-t border-border/60"
+              >
+                <Td className="font-medium">{row.glAccount}</Td>
+                <Td>{row.itemText}</Td>
+                <Td className="tabular text-right">{row.debit ? fmt(row.debit) : ""}</Td>
+                <Td className="tabular text-right">{row.credit ? fmt(row.credit) : ""}</Td>
+                <Td>{row.taxCode}</Td>
+                <Td>{row.jurisdiction}</Td>
+                <Td>{row.costCenter}</Td>
+                <Td>{row.profitCenter}</Td>
+                <Td>{row.orderNumber}</Td>
+                <Td>{row.wbsElement}</Td>
+              </tr>
+            ))
+          )}
+        </tbody>
+        <tfoot className="bg-surface-2 text-[12px]">
+          <tr>
+            <Td colSpan={2} className="text-right font-semibold">Total</Td>
+            <Td className="tabular text-right font-semibold">{fmt(totals.debit)}</Td>
+            <Td className="tabular text-right font-semibold">{fmt(totals.credit)}</Td>
+            <Td colSpan={6} />
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }
