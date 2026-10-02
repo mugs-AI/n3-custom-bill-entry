@@ -112,14 +112,17 @@ function audit(): PurchaseAuditResult {
 }
 
 describe("Advanced Expenditure Audit Trail", () => {
-  it("uses the exact 10 client Excel columns in the required order", () => {
+  it("uses the exact 13 client template columns B:N in the required order", () => {
     expect(AEAT_EXCEL_COLUMNS).toEqual([
+      "Company Code (4)",
       "G/L Account (10)",
       "Item Text (50)",
       "Debit",
       "Credit",
+      "Amount in Company Code Currency",
+      "Amount in Second Local Currency",
       "Tax Code (2)",
-      "Jurisdiction",
+      "Tax Jurisdiction (15)",
       "Cost Center (10)",
       "Profit Center (10)",
       "Order Number (12)",
@@ -180,9 +183,12 @@ describe("Advanced Expenditure Audit Trail", () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
+      companyCode: "1000",
       glAccount: "200007",
       itemText: "Non- Cash Payment IR 4 26-27",
       debit: 1231.4,
+      companyCurrencyAmount: "",
+      secondLocalCurrencyAmount: "",
       taxCode: "P5",
       jurisdiction: "",
       costCenter: "50000850",
@@ -200,10 +206,13 @@ describe("Advanced Expenditure Audit Trail", () => {
       audit(),
     );
     expect(rows).toContainEqual({
+      companyCode: "1000",
       glAccount: "800-1001",
       itemText: "Supplier A",
       debit: 0,
       credit: 100,
+      companyCurrencyAmount: "",
+      secondLocalCurrencyAmount: "",
       taxCode: "P5",
       jurisdiction: "",
       costCenter: "",
@@ -214,7 +223,42 @@ describe("Advanced Expenditure Audit Trail", () => {
     expect(advancedExpenditureTotals(rows)).toEqual({ debit: 100, credit: 100 });
   });
 
-  it("exports only the exact AEAT columns to an Excel-compatible workbook", () => {
+  it("defaults Breakdown credit side to ON and preserves real creditor codes", () => {
+    const rows = buildAdvancedExpenditureAuditRows(
+      report([
+        line({ invoiceId: "i1", glAccountCode: "200007", itemDescription: "Expense", taxCodeCode: "P5", beforeTax: 100 }),
+      ]),
+      audit(),
+    );
+    const credit = rows.find((r) => r.credit > 0);
+    expect(credit?.glAccount).toBe("800-1001");
+    expect(credit?.itemText).toBe("Supplier A");
+  });
+
+  it("can consolidate the credit side into one truthful row with blank G/L Account", () => {
+    const rows = buildAdvancedExpenditureAuditRows(
+      report([
+        line({ invoiceId: "i1", glAccountCode: "200007", itemDescription: "Expense", taxCodeCode: "P5", beforeTax: 100 }),
+      ]),
+      audit(),
+      { breakdownCreditSide: false },
+    );
+    const credits = rows.filter((r) => r.credit > 0);
+    expect(credits).toHaveLength(1);
+    expect(credits[0]).toMatchObject({
+      companyCode: "1000",
+      glAccount: "",
+      itemText: "Total Credit",
+      credit: 100,
+      taxCode: "P5",
+      costCenter: "",
+      profitCenter: "",
+      orderNumber: "",
+      wbsElement: "",
+    });
+  });
+
+  it("exports the exact 13 AEAT columns to an Excel-compatible workbook", () => {
     const rows = buildAdvancedExpenditureAuditRows(
       report([
         line({ invoiceId: "i1", glAccountCode: "200007", itemDescription: "HQIADS", projectCode: "50000850", stockCode: "C-0000623-01-03", beforeTax: 100 }),
@@ -226,6 +270,9 @@ describe("Advanced Expenditure Audit Trail", () => {
     expect(xml).toContain("200007");
     expect(xml).toContain("50000850");
     expect(xml).toContain("C-0000623-01-03");
-    expect(xml).not.toContain("Company Code (4)");
+    expect(xml).toContain("Company Code (4)");
+    expect(xml).toContain("Amount in Company Code Currency");
+    expect(xml).toContain("Amount in Second Local Currency");
+    expect(xml).toContain("Tax Jurisdiction (15)");
   });
 });
