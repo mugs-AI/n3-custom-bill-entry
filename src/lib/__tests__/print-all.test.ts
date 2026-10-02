@@ -25,13 +25,13 @@ describe("Correction F — routing & selection plan", () => {
     expect(tree).toMatch(/ReportsPurchasePrintAll/);
   });
 
-  it("All 9 views are pre-selected by default", () => {
+  it("All 10 views are pre-selected by default", () => {
     const src = read("src/routes/reports_.purchase.print-all.tsx");
     expect(src).toContain("new Set(VIEW_IDS)");
   });
 
   it("selectionPlan flags zero-selection as invalid and blocks accounting fetch", () => {
-    const empty = selectionPlan<string>([], ["expenditure-audit", "audit-trail", "posting-account"]);
+    const empty = selectionPlan<string>([], ["expenditure-audit", "advanced-expenditure-audit", "audit-trail", "posting-account"]);
     expect(empty.isValid).toBe(false);
     expect(empty.hasAccounting).toBe(false);
   });
@@ -106,10 +106,10 @@ describe("Correction F — shared header + report titles", () => {
   });
 });
 
-describe("Nine-report selection UI", () => {
-  it("places Expenditure Audit Trail first and Purchase Audit Trail last", () => {
+describe("Ten-report selection UI", () => {
+  it("keeps EAT1 first and adds AEAT as report 10", () => {
     const view = read("src/routes/reports_.purchase.$view.tsx");
-    expect(view).toMatch(/VIEW_IDS:[\s\S]{0,300}"expenditure-audit"[\s\S]{0,300}"hq-tax",[\s\S]{0,80}"audit-trail"/);
+    expect(view).toMatch(/VIEW_IDS:[\s\S]{0,400}"expenditure-audit"[\s\S]{0,400}"audit-trail",[\s\S]{0,100}"advanced-expenditure-audit"/);
   });
 
   it("offers accessible Up/Down ordering controls and tenant persistence", () => {
@@ -124,6 +124,6 @@ describe("Correction F — GL Analysis launcher entry point", () => {
   it("PurchaseReportLauncher links to the Print All route", () => {
     const src = read("src/routes/reports.tsx");
     expect(src).toContain("/reports/purchase/print-all");
-    expect(src).toMatch(/Print All 9 Reports/);
+    expect(src).toMatch(/Print All 10 Reports/);
   });
 });
