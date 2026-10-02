@@ -592,6 +592,7 @@ const REPORT_LINKS: { view: string; label: string }[] = [
   { view: "payment-type", label: "Summary of Payment Type" },
   { view: "hq-tax", label: "Summary of HQ Tax" },
   { view: "audit-trail", label: "Purchase Audit Trail" },
+  { view: "advanced-expenditure-audit", label: "Advanced Expenditure Audit Trail" },
 ];
 
 function PurchaseReportLauncher() {
@@ -612,7 +613,7 @@ function PurchaseReportLauncher() {
           </Link>
         ))}
         <Link to="/reports/purchase/print-all" className="app-btn app-btn-primary text-[12px]">
-          Print All 9 Reports
+          Print All 10 Reports
         </Link>
       </div>
       <div className="mt-2 text-[11px] text-muted-foreground">
