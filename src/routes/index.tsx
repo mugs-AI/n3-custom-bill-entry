@@ -1302,8 +1302,8 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
       <ErrorBanner label="Tariff Codes" query={tariffCodesQ} />
 
       {/* ================================= Header ================================= */}
-      <div className="app-card p-5">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="app-card p-3">
+        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
           <div>
             <label className="app-label">Purchase Invoice No.</label>
             <input
@@ -1383,7 +1383,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
           <div className="md:col-span-2">
             <label className="app-label">Supplier Address</label>
             <div
-              className="app-input min-h-[76px] whitespace-pre-line py-2"
+              className="app-input min-h-[52px] whitespace-pre-line py-1.5"
               role="group"
               aria-label="Supplier Address"
             >
@@ -1461,7 +1461,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
             />
           </div>
 
-          <div className="md:col-span-3 mt-1 flex items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-2">
+          <div className="md:col-span-3 flex items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-1.5">
             <label
               className="inline-flex cursor-pointer select-none items-center gap-2"
               htmlFor="tax-inclusive"
@@ -1712,21 +1712,21 @@ function LineList({
         ))}
       </div>
 
-      <div className="border-t-2 border-border-strong bg-surface-2 px-4 py-3">
-        <div className="ml-auto flex max-w-md flex-col gap-1 text-sm">
-          <div className="flex items-center justify-between">
+      <div className="border-t-2 border-border-strong bg-surface-2 px-4 py-2.5">
+        <div className="flex flex-wrap items-center justify-end gap-x-8 gap-y-1 text-sm">
+          <div className="flex items-baseline gap-2">
             <span className="text-xs font-semibold uppercase text-muted-foreground">
               Sub Total (MYR)
             </span>
-            <span className="tabular">{formatMoney(totals.subTotal)}</span>
+            <span className="tabular font-medium">{formatMoney(totals.subTotal)}</span>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex items-baseline gap-2">
             <span className="text-xs font-semibold uppercase text-muted-foreground">
-              Total Tax (MYR)
+              Tax (MYR)
             </span>
-            <span className="tabular">{formatMoney(totals.totalTax)}</span>
+            <span className="tabular font-medium">{formatMoney(totals.totalTax)}</span>
           </div>
-          <div className="mt-1 flex items-center justify-between border-t border-border pt-1">
+          <div className="flex items-baseline gap-2">
             <span className="text-xs font-bold uppercase">Grand Total (MYR)</span>
             <span className="tabular text-base font-semibold">
               {formatMoney(totals.grandTotal)}
@@ -1853,7 +1853,9 @@ function FieldCell({
   const readOnly = READONLY_FIELDS.has(id);
   const wideClass = "min-w-[220px] flex-[2_1_220px]";
   const medClass = "min-w-[180px] flex-[1.5_1_180px]";
-  const narrowClass = "min-w-[110px] flex-1";
+  const narrowClass = "min-w-[100px] flex-1";
+  const shortSelectClass = "min-w-[135px] flex-[0.8_1_145px]";
+  const refWideClass = "min-w-[190px] flex-[1.8_1_220px]";
 
   const fieldKey = `line:${line.key}:${id}`;
   const isInvalid = ctx.invalidFields.has(fieldKey);
@@ -1981,7 +1983,7 @@ function FieldCell({
       );
     case "hqTax":
       return wrap(
-        medClass,
+        shortSelectClass,
         <SearchableSelect
           compact
           popoverPortal
@@ -2010,7 +2012,7 @@ function FieldCell({
       const tariffEmpty =
         !ctx.tariffLoading && !ctx.tariffHasError && ctx.tariffOptions.length === 0;
       return wrap(
-        medClass,
+        shortSelectClass,
         <>
           <SearchableSelect
             compact
@@ -2100,7 +2102,7 @@ function FieldCell({
       );
     case "refNo":
       return wrap(
-        narrowClass,
+        refWideClass,
         <input
           className="app-input h-8 px-2 py-1 text-[13px]"
           value={line.refNo}
