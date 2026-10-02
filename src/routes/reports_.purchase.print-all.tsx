@@ -1,8 +1,8 @@
-// Purchase Reports — "Print All 9 Reports" preview & print
+// Purchase Reports — "Print All 10 Reports" preview & print
 // interface.
 //
 // Two-step flow:
-//   1. Selection step (default on entry): all 9 reports pre-checked. The
+//   1. Selection step (default on entry): all 10 reports pre-checked. The
 //      user can uncheck any and click "Prepare Print Preview".
 //   2. Preview step: renders every selected report, in the canonical order,
 //      as continuous flow content — no forced page break per report. The
@@ -46,6 +46,7 @@ import {
   type AuditFetchReply,
 } from "@/lib/purchase-report-inquiry";
 import {
+  AdvancedExpenditureAuditView,
   AuditTrailView,
   CompactReportHeader,
   ExpenditureAuditView,
@@ -60,24 +61,29 @@ import {
 export const Route = createFileRoute("/reports_/purchase/print-all")({
   head: () => ({
     meta: [
-      { title: "Print All 9 Purchase Reports · Custom Bill Entry" },
+      { title: "Print All 10 Purchase Reports · Custom Bill Entry" },
       {
         name: "description",
         content:
-          "Print all 9 Purchase Reports for the current GL Analysis inquiry as one continuous document.",
+          "Print all 10 Purchase Reports for the current GL Analysis inquiry as one continuous document.",
       },
-      { property: "og:title", content: "Print All 9 Purchase Reports · Custom Bill Entry" },
+      { property: "og:title", content: "Print All 10 Purchase Reports · Custom Bill Entry" },
       {
         property: "og:description",
         content:
-          "Print all 9 Purchase Reports for the current GL Analysis inquiry as one continuous document.",
+          "Print all 10 Purchase Reports for the current GL Analysis inquiry as one continuous document.",
       },
     ],
   }),
   component: PrintAllPage,
 });
 
-const ACCOUNTING_IDS: ViewId[] = ["expenditure-audit", "audit-trail", "posting-account"];
+const ACCOUNTING_IDS: ViewId[] = [
+  "expenditure-audit",
+  "advanced-expenditure-audit",
+  "audit-trail",
+  "posting-account",
+];
 
 function PrintAllPage() {
   const hydrated = useHydrated();
@@ -259,7 +265,7 @@ function PrintAllPage() {
         <div className="space-y-4">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight">Print All 9 Reports</h1>
+              <h1 className="text-xl font-semibold tracking-tight">Print All 10 Reports</h1>
               <p className="text-sm text-muted-foreground">
                 Choose which reports to include. Unchecked reports are absent from the
                 preview and are never printed.
@@ -365,8 +371,7 @@ function PrintAllPage() {
               {orderedSelection.length === 1 ? "" : "s"}
             </h1>
             <p className="text-sm text-muted-foreground">
-              Reports flow continuously; the browser paginates each A4 sheet only when
-              the previous is full.
+              Each selected report starts on a fresh printed page.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -450,6 +455,16 @@ function PrintAllPage() {
                     onRetry={() => auditQ.refetch()}
                   />
                 )}
+                {id === "advanced-expenditure-audit" && (
+                  <AdvancedExpenditureAuditView
+                    loading={auditLoading}
+                    error={auditError ?? null}
+                    report={cached}
+                    result={auditResult}
+                    piCount={piDocuments.length}
+                    onRetry={() => auditQ.refetch()}
+                  />
+                )}
                 {id === "audit-trail" && (
                   <AuditTrailView
                     loading={auditLoading}
@@ -473,7 +488,10 @@ function PrintAllPage() {
                 )}
                 {!isAccountingView(id) && (
                   <DimensionView
-                    view={id as Exclude<ViewId, "expenditure-audit" | "audit-trail" | "posting-account">}
+                    view={id as Exclude<
+                      ViewId,
+                      "expenditure-audit" | "advanced-expenditure-audit" | "audit-trail" | "posting-account"
+                    >}
                     report={cached}
                   />
                 )}
