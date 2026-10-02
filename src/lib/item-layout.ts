@@ -27,13 +27,13 @@ export const FIELD_IDS = [
 export type FieldId = (typeof FIELD_IDS)[number];
 
 export const FIELD_LABELS: Record<FieldId, string> = {
-  wbs: "WBS",
-  itemDescription: "Item Description",
+  wbs: "WBS (Stock)",
+  itemDescription: "Claim / Contract No. (Stock Name)",
   glAccount: "GL Account",
   glAccountName: "GL Account Name",
-  costCentre: "Cost Centre",
-  hqTax: "HQ Tax",
-  orderNo: "Order No.",
+  costCentre: "Cost Centre (Project)",
+  hqTax: "HQ TAX (SST)",
+  orderNo: "Order No. (Tariff)",
   qty: "Qty",
   unitPrice: "Unit Price",
   netAmount: "Net Amount",
