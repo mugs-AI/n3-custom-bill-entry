@@ -3,12 +3,15 @@ import type { PurchaseAuditResult } from "./audit-trail";
 import type { ReportData } from "./report-model";
 
 export const AEAT_EXCEL_COLUMNS = [
+  "Company Code (4)",
   "G/L Account (10)",
   "Item Text (50)",
   "Debit",
   "Credit",
+  "Amount in Company Code Currency",
+  "Amount in Second Local Currency",
   "Tax Code (2)",
-  "Jurisdiction",
+  "Tax Jurisdiction (15)",
   "Cost Center (10)",
   "Profit Center (10)",
   "Order Number (12)",
@@ -16,10 +19,13 @@ export const AEAT_EXCEL_COLUMNS = [
 ] as const;
 
 export interface AdvancedExpenditureAuditRow {
+  companyCode: string;
   glAccount: string;
   itemText: string;
   debit: number;
   credit: number;
+  companyCurrencyAmount: string;
+  secondLocalCurrencyAmount: string;
   taxCode: string;
   jurisdiction: string;
   costCenter: string;
@@ -52,10 +58,13 @@ function debitRows(report: ReportData): AdvancedExpenditureAuditRow[] {
       continue;
     }
     map.set(key, {
+      companyCode: "1000",
       glAccount,
       itemText,
       debit: round2(line.beforeTax),
       credit: 0,
+      companyCurrencyAmount: "",
+      secondLocalCurrencyAmount: "",
       taxCode,
       jurisdiction: "",
       costCenter,
@@ -74,7 +83,7 @@ function debitRows(report: ReportData): AdvancedExpenditureAuditRow[] {
   );
 }
 
-function creditRows(
+function detailedCreditRows(
   report: ReportData,
   audit: PurchaseAuditResult | null,
 ): AdvancedExpenditureAuditRow[] {
@@ -99,10 +108,13 @@ function creditRows(
     const existing =
       map.get(key) ??
       {
+        companyCode: "1000",
         glAccount,
         itemText,
         debit: 0,
         credit: 0,
+        companyCurrencyAmount: "",
+        secondLocalCurrencyAmount: "",
         taxCode: "",
         jurisdiction: "",
         costCenter: "",
@@ -126,11 +138,41 @@ function creditRows(
     .sort((a, b) => a.glAccount.localeCompare(b.glAccount, undefined, { numeric: true }));
 }
 
+function consolidatedCreditRow(
+  credits: AdvancedExpenditureAuditRow[],
+): AdvancedExpenditureAuditRow[] {
+  if (credits.length === 0) return [];
+  const uniqueTaxCodes = new Set(credits.map((r) => r.taxCode).filter(Boolean));
+  return [
+    {
+      companyCode: "1000",
+      glAccount: "",
+      itemText: "Total Credit",
+      debit: round2(sumTo2dp(credits.map((r) => r.debit))),
+      credit: round2(sumTo2dp(credits.map((r) => r.credit))),
+      companyCurrencyAmount: "",
+      secondLocalCurrencyAmount: "",
+      taxCode: uniqueTaxCodes.size === 1 ? [...uniqueTaxCodes][0] : "",
+      jurisdiction: "",
+      costCenter: "",
+      profitCenter: "",
+      orderNumber: "",
+      wbsElement: "",
+    },
+  ];
+}
+
 export function buildAdvancedExpenditureAuditRows(
   report: ReportData,
   audit: PurchaseAuditResult | null,
+  options: { breakdownCreditSide?: boolean } = {},
 ): AdvancedExpenditureAuditRow[] {
-  return [...debitRows(report), ...creditRows(report, audit)];
+  const breakdownCreditSide = options.breakdownCreditSide ?? true;
+  const credits = detailedCreditRows(report, audit);
+  return [
+    ...debitRows(report),
+    ...(breakdownCreditSide ? credits : consolidatedCreditRow(credits)),
+  ];
 }
 
 export function advancedExpenditureTotals(rows: AdvancedExpenditureAuditRow[]): {
@@ -159,7 +201,7 @@ function excelCell(value: string | number, type: "String" | "Number"): string {
 
 /**
  * Dependency-free SpreadsheetML workbook. Excel opens this directly and the
- * worksheet contains exactly the 10 client-required AEAT columns.
+ * worksheet contains exactly the 13 client-template AEAT columns, aligned to B:N.
  */
 export function buildAdvancedExpenditureExcelXml(
   rows: AdvancedExpenditureAuditRow[],
@@ -168,10 +210,13 @@ export function buildAdvancedExpenditureExcelXml(
   const body = rows
     .map((r) => {
       const values: Array<[string | number, "String" | "Number"]> = [
+        [r.companyCode, "String"],
         [r.glAccount, "String"],
         [r.itemText, "String"],
         [r.debit || "", r.debit ? "Number" : "String"],
         [r.credit || "", r.credit ? "Number" : "String"],
+        [r.companyCurrencyAmount, "String"],
+        [r.secondLocalCurrencyAmount, "String"],
         [r.taxCode, "String"],
         [r.jurisdiction, "String"],
         [r.costCenter, "String"],
