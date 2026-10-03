@@ -337,9 +337,15 @@ export interface BillFormProps {
    * sessionStorage draft key.
    */
   editInvoice?: BillDraft | null;
+  /** Edit route can place Back to History beside Discard / Update. */
+  showBackToHistory?: boolean;
 }
 
-export function BillForm({ mode = "create", editInvoice = null }: BillFormProps = {}) {
+export function BillForm({
+  mode = "create",
+  editInvoice = null,
+  showBackToHistory = false,
+}: BillFormProps = {}) {
   const layout = useItemLayout();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -374,6 +380,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
   const [isTaxInclusive, setIsTaxInclusive] = useState(initial.isTaxInclusive);
   const [lines, setLines] = useState<DetailLine[]>(initial.lines);
   const [save, setSave] = useState<SaveState>({ status: "idle" });
+  const [supplierDetailsOpen, setSupplierDetailsOpen] = useState(false);
 
   const noRetryOn401 = useCallback(
     (count: number, err: unknown) =>
@@ -1204,7 +1211,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
 
   return (
     <form
-      className="space-y-5"
+      className="space-y-3"
       onSubmit={(e) => e.preventDefault()}
       onKeyDown={(e) => {
         if (e.key === "Enter") {
@@ -1213,20 +1220,32 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
         }
       }}
     >
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
           <h1 className="text-xl font-semibold tracking-tight">
             {isEdit
               ? `Edit Purchase Invoice — ${editedDocCode || "(loading…)"}`
               : "New Bill Entry"}
           </h1>
-          <p className="text-sm text-muted-foreground">
-            {isEdit
-              ? "Loaded live from N3. Changes save to this existing document."
-              : "Simplified Purchase Invoice · posts directly to N3 · MYR"}
-          </p>
+          <InfoPopover
+            label={isEdit ? "About editing this Purchase Invoice" : "About New Bill Entry"}
+            text={
+              isEdit
+                ? "Loaded live from N3. Changes save to this existing document."
+                : "Simplified Purchase Invoice · posts directly to N3 · MYR"
+            }
+          />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {isEdit && showBackToHistory && (
+            <button
+              type="button"
+              className="app-btn"
+              onClick={() => navigate({ to: "/history" })}
+            >
+              Back to History
+            </button>
+          )}
           <button
             type="button"
             className="app-btn"
@@ -1302,8 +1321,37 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
       <ErrorBanner label="Tariff Codes" query={tariffCodesQ} />
 
       {/* ================================= Header ================================= */}
-      <div className="app-card p-3">
-        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
+      <div className="app-card p-2.5">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <label className="inline-flex cursor-pointer items-center gap-2 text-xs font-medium">
+              <input
+                type="checkbox"
+                checked={isTaxInclusive}
+                onChange={(e) => setIsTaxInclusive(e.target.checked)}
+              />
+              Tax Inclusive
+              <span className="font-semibold text-muted-foreground">
+                {isTaxInclusive ? "ON" : "OFF"}
+              </span>
+            </label>
+            <InfoPopover
+              label="Tax Inclusive information"
+              text="Defaults to OFF. Stored on the Purchase Invoice payload."
+              compact
+            />
+          </div>
+          <button
+            type="button"
+            className="app-btn h-8 px-3 text-xs"
+            onClick={() => setSupplierDetailsOpen(true)}
+          >
+            Supplier details / Term
+            {termId == null && <span className="ml-1 text-destructive">*</span>}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 lg:grid-cols-4">
           <div>
             <label className="app-label">Purchase Invoice No.</label>
             <input
@@ -1324,7 +1372,7 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
               required
             />
           </div>
-          <div data-field="supplier">
+          <div data-field="supplier" className="lg:col-span-2">
             <label className="app-label">Supplier</label>
             <SearchableSelect
               options={supplierOptions}
@@ -1341,22 +1389,13 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
               withPopoverSearch
               minPopoverWidth={650}
             />
-            {enriching && (
-              <p className="mt-1 text-[11px] text-muted-foreground" role="status">
-                Loading full supplier details…
-              </p>
-            )}
             {supplierStale && (
-              <p className="mt-1 text-[11px] text-warning" role="alert">
+              <p className="mt-0.5 text-[10px] text-warning" role="alert">
                 {STALE_SELECTION_MESSAGE}
               </p>
             )}
           </div>
 
-          <div className="md:col-span-2">
-            <label className="app-label">Supplier Name</label>
-            <input className="app-input" readOnly value={supplierName} />
-          </div>
           <div data-field="purchaser">
             <label className="app-label">Payment Type (Purchaser)</label>
             <SearchableSelect
@@ -1368,71 +1407,10 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
                 setPurchaserLabelDraft(o?.label ?? "");
               }}
               loading={purchasersQ.isLoading}
-              placeholder={
-                purchasersQ.isLoading ? "Loading purchasers…" : "Blank — select if needed"
-              }
+              placeholder={purchasersQ.isLoading ? "Loading purchasers…" : "Blank — select if needed"}
               ariaLabel="Purchaser"
             />
-            {purchaserStale && (
-              <p className="mt-1 text-[11px] text-warning" role="alert">
-                {STALE_SELECTION_MESSAGE}
-              </p>
-            )}
           </div>
-
-          <div className="md:col-span-2">
-            <label className="app-label">Supplier Address</label>
-            <div
-              className="app-input min-h-[52px] whitespace-pre-line py-1.5"
-              role="group"
-              aria-label="Supplier Address"
-            >
-              {addressLines.length ? addressLines.join("\n") : ""}
-            </div>
-          </div>
-          <div>
-            <label className="app-label">Supplier Contact</label>
-            <input className="app-input" readOnly value={contact} />
-          </div>
-
-          <div>
-            <label className="app-label">Supplier Phone</label>
-            <input className="app-input" readOnly value={phone} />
-          </div>
-          <div>
-            <label className="app-label">Supplier Email</label>
-            <input className="app-input" readOnly value={email} />
-          </div>
-          <div data-field="term">
-            <label className="app-label">
-              Term <span className="text-destructive">*</span>
-            </label>
-            <SearchableSelect
-              options={termOptions}
-              value={termId != null ? String(termId) : null}
-              selectedLabel={termLabel}
-              onChange={(o) => {
-                setTermTouched(true);
-                setTermId(o ? Number(o.value) : null);
-                setTermLabelDraft(o?.label ?? "");
-              }}
-              loading={termsQ.isLoading}
-              placeholder={
-                termsQ.isLoading
-                  ? "Loading terms…"
-                  : supplierId
-                    ? "Default from supplier"
-                    : "Select a term"
-              }
-              ariaLabel="Term"
-            />
-            {termStale && (
-              <p className="mt-1 text-[11px] text-warning" role="alert">
-                {STALE_SELECTION_MESSAGE}
-              </p>
-            )}
-          </div>
-
           <div>
             <label className="app-label">HQ Sequence</label>
             <input
@@ -1460,35 +1438,106 @@ export function BillForm({ mode = "create", editInvoice = null }: BillFormProps 
               aria-invalid={invalidFields.has("supplierInvNo") || undefined}
             />
           </div>
-
-          <div className="md:col-span-3 flex items-center gap-3 rounded-md border border-border bg-surface-2 px-3 py-1.5">
-            <label
-              className="inline-flex cursor-pointer select-none items-center gap-2"
-              htmlFor="tax-inclusive"
-            >
-              <input
-                id="tax-inclusive"
-                type="checkbox"
-                role="switch"
-                aria-checked={isTaxInclusive}
-                checked={isTaxInclusive}
-                onChange={(e) => setIsTaxInclusive(e.target.checked)}
-                className="h-4 w-4 accent-[var(--color-primary)]"
-              />
-              <span className="text-sm font-medium">Tax Inclusive</span>
-            </label>
-            <span
-              className={`text-xs font-semibold ${isTaxInclusive ? "text-primary" : "text-muted-foreground"}`}
-              aria-hidden
-            >
-              {isTaxInclusive ? "ON" : "OFF"}
-            </span>
-            <span className="text-[11px] text-muted-foreground">
-              Defaults to OFF. Stored on the Purchase Invoice payload.
-            </span>
-          </div>
         </div>
       </div>
+
+      {supplierDetailsOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/25" role="presentation">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            aria-label="Close supplier details"
+            onClick={() => setSupplierDetailsOpen(false)}
+          />
+          <aside
+            className="relative z-10 h-full w-full max-w-lg overflow-y-auto border-l border-border bg-background p-4 shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Supplier details and term"
+          >
+            <div className="mb-4 flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-semibold">Supplier details / Term</h2>
+                <p className="text-xs text-muted-foreground">
+                  Secondary supplier information is kept here to leave more room for invoice lines.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="app-btn h-8 px-3"
+                onClick={() => setSupplierDetailsOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="app-label">Supplier Name</label>
+                <input className="app-input" readOnly value={supplierName} />
+              </div>
+              <div>
+                <label className="app-label">Supplier Address</label>
+                <div
+                  className="app-input min-h-[64px] whitespace-pre-line py-2"
+                  role="group"
+                  aria-label="Supplier Address"
+                >
+                  {addressLines.length ? addressLines.join("\n") : ""}
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="app-label">Supplier Contact</label>
+                  <input className="app-input" readOnly value={contact} />
+                </div>
+                <div>
+                  <label className="app-label">Supplier Phone</label>
+                  <input className="app-input" readOnly value={phone} />
+                </div>
+              </div>
+              <div>
+                <label className="app-label">Supplier Email</label>
+                <input className="app-input" readOnly value={email} />
+              </div>
+              <div data-field="term">
+                <label className="app-label">
+                  Term <span className="text-destructive">*</span>
+                </label>
+                <SearchableSelect
+                  options={termOptions}
+                  value={termId != null ? String(termId) : null}
+                  selectedLabel={termLabel}
+                  onChange={(o) => {
+                    setTermTouched(true);
+                    setTermId(o ? Number(o.value) : null);
+                    setTermLabelDraft(o?.label ?? "");
+                  }}
+                  loading={termsQ.isLoading}
+                  placeholder={
+                    termsQ.isLoading
+                      ? "Loading terms…"
+                      : supplierId
+                        ? "Default from supplier"
+                        : "Select a term"
+                  }
+                  ariaLabel="Term"
+                />
+                {termStale && (
+                  <p className="mt-1 text-[11px] text-warning" role="alert">
+                    {STALE_SELECTION_MESSAGE}
+                  </p>
+                )}
+              </div>
+              {enriching && (
+                <p className="text-xs text-muted-foreground" role="status">
+                  Loading full supplier details…
+                </p>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
 
       <LineList
         lines={lines}
@@ -1580,6 +1629,33 @@ function pickEmail(detail: SupplierDetail | null): string {
     }
   }
   return "";
+}
+
+function InfoPopover({
+  label,
+  text,
+  compact = false,
+}: {
+  label: string;
+  text: string;
+  compact?: boolean;
+}) {
+  return (
+    <details className="group relative">
+      <summary
+        className={`flex cursor-pointer list-none items-center justify-center rounded-full border border-border bg-background font-semibold text-muted-foreground shadow-sm transition hover:border-primary/40 hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 ${
+          compact ? "h-5 w-5 text-[10px]" : "h-7 w-7 text-xs"
+        }`}
+        aria-label={label}
+        title={label}
+      >
+        i
+      </summary>
+      <div className="absolute left-0 top-full z-40 mt-2 w-72 rounded-lg border border-border bg-background p-3 text-xs font-normal leading-relaxed text-foreground shadow-xl">
+        {text}
+      </div>
+    </details>
+  );
 }
 
 function ErrorBanner({
@@ -1682,23 +1758,21 @@ function LineList({
 
   return (
     <div className="app-card overflow-hidden">
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <div>
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">Invoice Lines</h2>
-          <p className="text-[11px] text-muted-foreground">
-            Two-row card · configure fields in{" "}
-            <a className="underline" href="/settings">
-              Settings
-            </a>{" "}
-            · Enter advances field / creates line · Net = Qty × Unit Price
-          </p>
+          <InfoPopover
+            label="Invoice line entry help"
+            text="Two-row card · configure fields in Settings · Enter advances field / creates line · Net = Qty × Unit Price"
+            compact
+          />
         </div>
-        <button type="button" className="app-btn" onClick={onAdd}>
+        <button type="button" className="app-btn h-8 px-3 text-xs" onClick={onAdd}>
           + Add line
         </button>
       </div>
 
-      <div ref={gridRef} onKeyDown={handleGridKey} className="space-y-3 p-3">
+      <div ref={gridRef} onKeyDown={handleGridKey} className="space-y-2 p-2">
         {lines.map((line, i) => (
           <LineCard
             key={line.key}
@@ -1787,51 +1861,34 @@ function LineCard({
     <FieldCell key={id} id={id} line={line} index={index} error={errorFor(id)} {...ctx} />
   );
 
-  // Alternating card palette. Colour is a secondary cue; every card also has
-  // an explicit "Item N" header + numeric badge so users don't rely on colour.
+  // Alternating tint + left border separates lines without spending a full
+  // header row on "Item 1 / Item 2".
   const palette = [
-    { bg: "bg-[#f8fbff]", border: "border-l-4 border-l-sky-400", badge: "bg-sky-100 text-sky-800" },
-    {
-      bg: "bg-[#f6fbf7]",
-      border: "border-l-4 border-l-emerald-400",
-      badge: "bg-emerald-100 text-emerald-800",
-    },
-    {
-      bg: "bg-[#fffaf3]",
-      border: "border-l-4 border-l-amber-400",
-      badge: "bg-amber-100 text-amber-800",
-    },
-    {
-      bg: "bg-[#fbf7ff]",
-      border: "border-l-4 border-l-violet-400",
-      badge: "bg-violet-100 text-violet-800",
-    },
+    { bg: "bg-[#f8fbff]", border: "border-l-4 border-l-sky-400" },
+    { bg: "bg-[#f6fbf7]", border: "border-l-4 border-l-emerald-400" },
+    { bg: "bg-[#fffaf3]", border: "border-l-4 border-l-amber-400" },
+    { bg: "bg-[#fbf7ff]", border: "border-l-4 border-l-violet-400" },
   ];
   const tone = palette[index % palette.length];
 
   return (
     <div
       data-line-row
-      className={`grid-row-focus rounded-lg border border-border ${tone.border} ${tone.bg}`}
+      className={`grid-row-focus relative rounded-lg border border-border ${tone.border} ${tone.bg}`}
     >
-      <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">
-        <span
-          className={`inline-flex items-center rounded px-2 py-0.5 text-[11px] font-semibold tabular ${tone.badge}`}
-        >
-          Item {index + 1}
-        </span>
+      {canRemove && (
         <button
           type="button"
           tabIndex={-1}
           onClick={onRemove}
-          disabled={!canRemove}
-          className="text-xs text-muted-foreground hover:text-destructive disabled:opacity-40"
+          className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background/90 text-sm font-semibold text-muted-foreground shadow-sm hover:border-destructive/40 hover:text-destructive"
           aria-label={`Delete item ${index + 1}`}
+          title={`Delete item ${index + 1}`}
         >
-          Delete line
+          ×
         </button>
-      </div>
-      <div className="space-y-2 p-3">
+      )}
+      <div className="space-y-1.5 p-2 pr-9">
         <RowRow ids={layout.row1} render={renderField} />
         <RowRow ids={layout.row2} render={renderField} />
       </div>
@@ -1840,7 +1897,7 @@ function LineCard({
 }
 
 function RowRow({ ids, render }: { ids: FieldId[]; render: (id: FieldId) => React.ReactNode }) {
-  return <div className="flex flex-wrap gap-2">{ids.map((id) => render(id))}</div>;
+  return <div className="flex flex-wrap gap-1.5">{ids.map((id) => render(id))}</div>;
 }
 
 function FieldCell({
