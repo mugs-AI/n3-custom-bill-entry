@@ -27,12 +27,41 @@ describe("New Bill entry clarity refinements", () => {
 
   it("keeps the New Bill header compact and totals on one responsive row", () => {
     const src = read("src/routes/index.tsx");
-    expect(src).toContain('<div className="app-card p-3">');
-    expect(src).toContain('grid grid-cols-1 gap-2.5 md:grid-cols-3');
+    expect(src).toContain('<div className="app-card p-2.5">');
+    expect(src).toContain('grid grid-cols-1 gap-2 lg:grid-cols-4');
     expect(src).toContain("Sub Total (MYR)");
     expect(src).toContain("Tax (MYR)");
     expect(src).toContain("Grand Total (MYR)");
     expect(src).toContain("flex flex-wrap items-center justify-end gap-x-8");
+  });
+
+  it("moves page help into an info popover and secondary supplier details into a right drawer", () => {
+    const src = read("src/routes/index.tsx");
+    expect(src).toContain("function InfoPopover");
+    expect(src).toContain('label={isEdit ? "About editing this Purchase Invoice" : "About New Bill Entry"}');
+    expect(src).toContain("Supplier details / Term");
+    expect(src).toContain('aria-label="Supplier details and term"');
+    expect(src).toContain("Secondary supplier information is kept here");
+    expect(src).toContain("supplierDetailsOpen");
+  });
+
+  it("removes the per-line header strip and uses a compact delete icon", () => {
+    const src = read("src/routes/index.tsx");
+    expect(src).toContain('className="space-y-1.5 p-2 pr-9"');
+    expect(src).toContain("Delete item ${index + 1}");
+    expect(src).toContain("×");
+    expect(src).not.toContain("Item {index + 1}");
+  });
+
+  it("puts Back to History, Discard changes and Update in N3 in the BillForm action row", () => {
+    const form = read("src/routes/index.tsx");
+    const edit = read("src/routes/purchase-invoices.$id.edit.tsx");
+    expect(form).toContain("showBackToHistory");
+    expect(form).toContain("Back to History");
+    expect(form).toContain("Discard changes");
+    expect(form).toContain("Update in N3");
+    expect(edit).toContain("showBackToHistory");
+    expect(edit).not.toContain('className="mb-3 flex items-center justify-end"');
   });
 });
 
