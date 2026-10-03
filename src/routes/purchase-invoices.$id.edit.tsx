@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AppShell } from "@/components/AppShell";
 import { useAuthToken, useHydrated } from "@/hooks/use-auth";
@@ -45,11 +45,6 @@ function EditPurchaseInvoicePage() {
 
   return (
     <AppShell>
-      <div className="mb-3 flex items-center justify-end">
-        <Link to="/history" className="app-btn">
-          Back to History
-        </Link>
-      </div>
       {!hydrated || !token ? (
         <div className="app-card p-6 text-sm text-muted-foreground">
           Sign in to N3 to edit this Purchase Invoice.
@@ -63,7 +58,11 @@ function EditPurchaseInvoicePage() {
           Failed to load Purchase Invoice: {q.error instanceof Error ? q.error.message : "Unknown"}
         </div>
       ) : q.data ? (
-        <BillForm mode="edit" editInvoice={invoiceToDraft(q.data)} />
+        <BillForm
+          mode="edit"
+          editInvoice={invoiceToDraft(q.data)}
+          showBackToHistory
+        />
       ) : null}
     </AppShell>
   );
