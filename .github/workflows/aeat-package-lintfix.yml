@@ -1,0 +1,52 @@
+name: AEAT package lint fix and verify
+
+on:
+  push:
+    branches:
+      - verify/aeat-optional-columns-lintfix
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+
+      - name: Fix only AEAT package files
+        run: |
+          bun x eslint --fix             src/lib/__tests__/advanced-expenditure-audit.test.ts             src/lib/__tests__/aeat-column-settings.test.ts             src/lib/__tests__/entry-aeat-ui.test.ts             src/lib/__tests__/report-header-settings.test.ts             src/lib/advanced-expenditure-audit.ts             src/lib/aeat-column-settings.ts             'src/routes/reports_.purchase.$view.tsx'             src/routes/settings.tsx
+
+      - name: Commit package-only lint fixes
+        run: |
+          if ! git diff --quiet; then
+            git config user.name "mugs-AI"
+            git config user.email "lks.mugs@gmail.com"
+            git add               src/lib/__tests__/advanced-expenditure-audit.test.ts               src/lib/__tests__/aeat-column-settings.test.ts               src/lib/__tests__/entry-aeat-ui.test.ts               src/lib/__tests__/report-header-settings.test.ts               src/lib/advanced-expenditure-audit.ts               src/lib/aeat-column-settings.ts               'src/routes/reports_.purchase.$view.tsx'               src/routes/settings.tsx
+            git commit -m "Fix AEAT package lint issues [skip ci]"
+            git push origin HEAD:verify/aeat-optional-columns-lintfix
+          fi
+
+      - name: Tests
+        run: bun x vitest run
+      - name: Typecheck
+        run: bun x tsc --noEmit
+
+      - name: Package lint
+        run: |
+          bun x eslint             src/lib/__tests__/advanced-expenditure-audit.test.ts             src/lib/__tests__/aeat-column-settings.test.ts             src/lib/__tests__/entry-aeat-ui.test.ts             src/lib/__tests__/report-header-settings.test.ts             src/lib/advanced-expenditure-audit.ts             src/lib/aeat-column-settings.ts             'src/routes/reports_.purchase.$view.tsx'             src/routes/settings.tsx
+
+      - name: Full lint baseline comparison
+        continue-on-error: true
+        run: bun run lint
+
+      - name: Production build
+        run: bun run build
