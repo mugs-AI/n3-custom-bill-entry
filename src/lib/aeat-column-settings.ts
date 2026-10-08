@@ -35,9 +35,7 @@ function storage(): Storage | null {
   }
 }
 
-export function aeatColumnSettingsStorageKey(
-  scope = getLayoutScope(),
-): string {
+export function aeatColumnSettingsStorageKey(scope = getLayoutScope()): string {
   return `custom-bill-entry:aeat-columns:${scope.tenantId}:${scope.userId}`;
 }
 
@@ -47,9 +45,7 @@ export function normalizeAeatColumnSettings(raw: unknown): AeatColumnSettings {
   const source = Array.isArray(candidate.shownOptionalColumns)
     ? candidate.shownOptionalColumns
     : [];
-  const shownOptionalColumns = AEAT_OPTIONAL_COLUMN_KEYS.filter((key) =>
-    source.includes(key),
-  );
+  const shownOptionalColumns = AEAT_OPTIONAL_COLUMN_KEYS.filter((key) => source.includes(key));
   return { schemaVersion: 1, shownOptionalColumns };
 }
 
@@ -64,9 +60,7 @@ export function loadAeatColumnSettings(): AeatColumnSettings {
   }
 }
 
-export function saveAeatColumnSettings(
-  settings: AeatColumnSettings,
-): AeatColumnSettings {
+export function saveAeatColumnSettings(settings: AeatColumnSettings): AeatColumnSettings {
   const safe = normalizeAeatColumnSettings(settings);
   const s = storage();
   if (s) {
