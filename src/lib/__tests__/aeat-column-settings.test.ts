@@ -57,10 +57,7 @@ describe("AEAT optional column settings", () => {
     const normalized = normalizeAeatColumnSettings({
       shownOptionalColumns: ["jurisdiction", "unknown", "companyCurrencyAmount"],
     });
-    expect(normalized.shownOptionalColumns).toEqual([
-      "companyCurrencyAmount",
-      "jurisdiction",
-    ]);
+    expect(normalized.shownOptionalColumns).toEqual(["companyCurrencyAmount", "jurisdiction"]);
 
     saveAeatColumnSettings(normalized);
     expect(loadAeatColumnSettings()).toEqual(normalized);
