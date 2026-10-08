@@ -3,6 +3,8 @@ import { type ReactNode, useEffect, useState } from "react";
 import { SessionHeaderControls } from "@/components/SessionHeaderControls";
 import { useAuthToken } from "@/hooks/use-auth";
 
+const APP_VERSION = "v1.0.2026.10.08";
+
 export function AppShell({ children }: { children: ReactNode }) {
   const token = useAuthToken();
   const [isDev, setIsDev] = useState(false);
@@ -19,7 +21,10 @@ export function AppShell({ children }: { children: ReactNode }) {
               N3
             </span>
             <div className="leading-tight">
-              <div className="text-sm font-semibold">Custom Bill Entry</div>
+              <div className="flex items-baseline gap-2">
+                <div className="text-sm font-semibold">Custom Bill Entry</div>
+                <span className="text-[9px] font-medium text-muted-foreground">{APP_VERSION}</span>
+              </div>
               <div className="text-[11px] text-muted-foreground">N3 AI Cloud Accounting</div>
             </div>
           </Link>
