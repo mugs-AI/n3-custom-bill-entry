@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AEAT_EXCEL_COLUMNS,
   advancedExpenditureTotals,
+  aeatScreenLabel,
   buildAdvancedExpenditureAuditRows,
   buildAdvancedExpenditureCsv,
   buildAdvancedExpenditureExcelXml,
@@ -130,6 +131,22 @@ describe("Advanced Expenditure Audit Trail", () => {
       "Order Number (12)",
       "WBS Element (24)",
     ]);
+  });
+
+  it("uses shorter screen labels without changing Excel/CSV template labels", () => {
+    const columns = getAdvancedExpenditureColumns();
+    const byKey = new Map(columns.map((column) => [column.key, aeatScreenLabel(column)]));
+    expect(byKey.get("companyCode")).toBe("CO. CODE");
+    expect(byKey.get("glAccount")).toBe("GL CODE");
+    expect(byKey.get("taxCode")).toBe("TAX CODE");
+    expect(byKey.get("orderNumber")).toBe("ORDER NO.");
+    expect(byKey.get("wbsElement")).toBe("WBS ELEMENT");
+
+    expect(columns.find((column) => column.key === "companyCode")?.label).toBe("Company Code (4)");
+    expect(columns.find((column) => column.key === "glAccount")?.label).toBe("G/L Account (10)");
+    expect(columns.find((column) => column.key === "taxCode")?.label).toBe("Tax Code (2)");
+    expect(columns.find((column) => column.key === "orderNumber")?.label).toBe("Order Number (12)");
+    expect(columns.find((column) => column.key === "wbsElement")?.label).toBe("WBS Element (24)");
   });
 
   it("hides the three optional AEAT columns by default and preserves canonical order when enabled", () => {
