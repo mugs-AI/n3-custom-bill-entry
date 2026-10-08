@@ -3,19 +3,19 @@ import type { PurchaseAuditResult } from "./audit-trail";
 import type { ReportData } from "./report-model";
 
 export const AEAT_EXCEL_COLUMNS = [
-  "Company Code (4)",
-  "G/L Account (10)",
+  "CO. CODE",
+  "GL CODE",
   "Item Text (50)",
   "Debit",
   "Credit",
   "Amount in Company Code Currency",
   "Amount in Second Local Currency",
-  "Tax Code (2)",
+  "TAX CODE",
   "Tax Jurisdiction (15)",
-  "Cost Center (10)",
-  "Profit Center (10)",
-  "Order Number (12)",
-  "WBS Element (24)",
+  "Cost Center",
+  "Profit Center",
+  "ORDER NO.",
+  "WBS ELEMENT",
 ] as const;
 
 export type AeatColumnKey =
@@ -41,8 +41,8 @@ export interface AeatColumnDefinition {
 }
 
 export const AEAT_COLUMNS: readonly AeatColumnDefinition[] = [
-  { key: "companyCode", label: "Company Code (4)" },
-  { key: "glAccount", label: "G/L Account (10)" },
+  { key: "companyCode", label: "CO. CODE" },
+  { key: "glAccount", label: "GL CODE" },
   { key: "itemText", label: "Item Text (50)" },
   { key: "debit", label: "Debit", numeric: true },
   { key: "credit", label: "Credit", numeric: true },
@@ -56,12 +56,12 @@ export const AEAT_COLUMNS: readonly AeatColumnDefinition[] = [
     label: "Amount in Second Local Currency",
     optional: true,
   },
-  { key: "taxCode", label: "Tax Code (2)" },
+  { key: "taxCode", label: "TAX CODE" },
   { key: "jurisdiction", label: "Tax Jurisdiction (15)", optional: true },
-  { key: "costCenter", label: "Cost Center (10)" },
-  { key: "profitCenter", label: "Profit Center (10)" },
-  { key: "orderNumber", label: "Order Number (12)" },
-  { key: "wbsElement", label: "WBS Element (24)" },
+  { key: "costCenter", label: "Cost Center" },
+  { key: "profitCenter", label: "Profit Center" },
+  { key: "orderNumber", label: "ORDER NO." },
+  { key: "wbsElement", label: "WBS ELEMENT" },
 ];
 
 export function getAdvancedExpenditureColumns(
@@ -71,13 +71,7 @@ export function getAdvancedExpenditureColumns(
   return AEAT_COLUMNS.filter((column) => !column.optional || shown.has(column.key));
 }
 
-export const AEAT_SCREEN_LABELS: Partial<Record<AeatColumnKey, string>> = {
-  companyCode: "CO. CODE",
-  glAccount: "GL CODE",
-  taxCode: "TAX CODE",
-  orderNumber: "ORDER NO.",
-  wbsElement: "WBS ELEMENT",
-};
+export const AEAT_SCREEN_LABELS: Partial<Record<AeatColumnKey, string>> = {};
 
 export function aeatScreenLabel(column: AeatColumnDefinition): string {
   return AEAT_SCREEN_LABELS[column.key] ?? column.label;
