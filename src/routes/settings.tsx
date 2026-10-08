@@ -50,8 +50,7 @@ export const Route = createFileRoute("/settings")({
       { property: "og:title", content: "Settings · Custom Bill Entry" },
       {
         property: "og:description",
-        content:
-          "Item line layout and report print preferences for the Custom Bill Entry app.",
+        content: "Item line layout and report print preferences for the Custom Bill Entry app.",
       },
     ],
   }),
@@ -148,9 +147,7 @@ function LayoutEditor() {
         <h2 className="text-sm font-semibold">Item Line Layout</h2>
         <span
           className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-            dirty
-              ? "bg-destructive/10 text-destructive"
-              : "bg-success/10 text-success"
+            dirty ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"
           }`}
         >
           {dirty ? "Unsaved changes" : "Saved"}
@@ -179,8 +176,8 @@ function LayoutEditor() {
       </div>
 
       <p className="mt-2 text-[11px] text-muted-foreground">
-        Every one of the {FIELD_IDS.length} fields must appear exactly once. Each row can hold
-        up to {MAX_PER_ROW} fields.
+        Every one of the {FIELD_IDS.length} fields must appear exactly once. Each row can hold up to{" "}
+        {MAX_PER_ROW} fields.
       </p>
 
       {flash && (
@@ -339,8 +336,7 @@ function AeatColumnVisibilityCard() {
   }, []);
 
   const dirty =
-    JSON.stringify(saved.shownOptionalColumns) !==
-    JSON.stringify(draft.shownOptionalColumns);
+    JSON.stringify(saved.shownOptionalColumns) !== JSON.stringify(draft.shownOptionalColumns);
 
   const toggle = (key: AeatOptionalColumnKey) => {
     setDraft((current) => ({
@@ -389,19 +385,15 @@ function AeatColumnVisibilityCard() {
           >
             Save AEAT Columns
           </button>
-          <button
-            type="button"
-            className="app-btn h-8 px-2.5 text-xs"
-            onClick={onReset}
-          >
+          <button type="button" className="app-btn h-8 px-2.5 text-xs" onClick={onReset}>
             Reset Default
           </button>
         </div>
       </div>
 
       <p className="mt-2 text-[11px] text-muted-foreground">
-        These three columns are optional in AEAT and are hidden by default. The on-screen
-        report, Export Excel and Export CSV use the same saved column visibility.
+        These three columns are optional in AEAT and are hidden by default. The on-screen report,
+        Export Excel and Export CSV use the same saved column visibility.
       </p>
 
       {flash && (
@@ -430,7 +422,11 @@ function AeatColumnVisibilityCard() {
       </div>
 
       <div className="mt-2 text-[11px] text-muted-foreground">
-        Default: {DEFAULT_AEAT_COLUMN_SETTINGS.shownOptionalColumns.length === 0 ? "all three hidden" : "custom"}.
+        Default:{" "}
+        {DEFAULT_AEAT_COLUMN_SETTINGS.shownOptionalColumns.length === 0
+          ? "all three hidden"
+          : "custom"}
+        .
       </div>
     </section>
   );
@@ -655,10 +651,7 @@ function A4Preview({
         style={{ aspectRatio: "210 / 297" }}
         aria-hidden="true"
       >
-        <div
-          className="absolute inset-y-0 left-0 bg-surface-2"
-          style={{ width: `${leftPct}%` }}
-        />
+        <div className="absolute inset-y-0 left-0 bg-surface-2" style={{ width: `${leftPct}%` }} />
         <div
           className="absolute inset-y-0 right-0 bg-surface-2"
           style={{ width: `${rightPct}%` }}
