@@ -71,6 +71,18 @@ export function getAdvancedExpenditureColumns(
   return AEAT_COLUMNS.filter((column) => !column.optional || shown.has(column.key));
 }
 
+export const AEAT_SCREEN_LABELS: Partial<Record<AeatColumnKey, string>> = {
+  companyCode: "CO. CODE",
+  glAccount: "GL CODE",
+  taxCode: "TAX CODE",
+  orderNumber: "ORDER NO.",
+  wbsElement: "WBS ELEMENT",
+};
+
+export function aeatScreenLabel(column: AeatColumnDefinition): string {
+  return AEAT_SCREEN_LABELS[column.key] ?? column.label;
+}
+
 export interface AdvancedExpenditureAuditRow {
   companyCode: string;
   glAccount: string;
