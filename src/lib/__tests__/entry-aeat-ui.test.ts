@@ -71,6 +71,6 @@ describe("AEAT interaction refinements", () => {
     expect(src).toContain("const [breakdownCreditSide, setBreakdownCreditSide] = useState(true)");
     expect(src).toContain("Breakdown credit side");
     expect(src).toContain("buildAdvancedExpenditureAuditRows(report, result, { breakdownCreditSide })");
-    expect(src).toContain("buildAdvancedExpenditureExcelXml(rows)");
+    expect(src).toContain("buildAdvancedExpenditureExcelXml(rows, visibleColumns)");
   });
 });
