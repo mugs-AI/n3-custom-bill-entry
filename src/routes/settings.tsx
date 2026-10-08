@@ -28,6 +28,15 @@ import {
   type ReportPrintSettings,
 } from "@/lib/report-print-settings";
 import { useHydrated } from "@/hooks/use-auth";
+import {
+  AEAT_OPTIONAL_COLUMN_KEYS,
+  AEAT_OPTIONAL_COLUMN_LABELS,
+  DEFAULT_AEAT_COLUMN_SETTINGS,
+  loadAeatColumnSettings,
+  resetAeatColumnSettings,
+  saveAeatColumnSettings,
+  type AeatOptionalColumnKey,
+} from "@/lib/aeat-column-settings";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
@@ -63,6 +72,7 @@ function SettingsPage() {
         {hydrated ? (
           <>
             <LayoutEditor />
+            <AeatColumnVisibilityCard />
             <PrintLayoutCard />
           </>
         ) : (
@@ -315,6 +325,117 @@ function LayoutPreview({ layout }: { layout: ItemLayout }) {
   );
 }
 
+// ----- AEAT column visibility ---------------------------------------------
+
+function AeatColumnVisibilityCard() {
+  const [saved, setSaved] = useState(() => loadAeatColumnSettings());
+  const [draft, setDraft] = useState(saved);
+  const [flash, setFlash] = useState<string | null>(null);
+
+  useEffect(() => {
+    const next = loadAeatColumnSettings();
+    setSaved(next);
+    setDraft(next);
+  }, []);
+
+  const dirty =
+    JSON.stringify(saved.shownOptionalColumns) !==
+    JSON.stringify(draft.shownOptionalColumns);
+
+  const toggle = (key: AeatOptionalColumnKey) => {
+    setDraft((current) => ({
+      ...current,
+      shownOptionalColumns: current.shownOptionalColumns.includes(key)
+        ? current.shownOptionalColumns.filter((item) => item !== key)
+        : AEAT_OPTIONAL_COLUMN_KEYS.filter(
+            (item) => current.shownOptionalColumns.includes(item) || item === key,
+          ),
+    }));
+  };
+
+  const onSave = () => {
+    const next = saveAeatColumnSettings(draft);
+    setSaved(next);
+    setDraft(next);
+    setFlash("AEAT columns saved");
+    window.setTimeout(() => setFlash(null), 2000);
+  };
+
+  const onReset = () => {
+    const next = resetAeatColumnSettings();
+    setSaved(next);
+    setDraft(next);
+    setFlash("AEAT columns reset to default");
+    window.setTimeout(() => setFlash(null), 2000);
+  };
+
+  return (
+    <section className="app-card p-4" aria-label="Advanced Expenditure Audit Trail Columns">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border pb-2">
+        <h2 className="text-sm font-semibold">Advanced Expenditure Audit Trail Columns</h2>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+            dirty ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"
+          }`}
+        >
+          {dirty ? "Unsaved changes" : "Saved"}
+        </span>
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            className="app-btn app-btn-primary h-8 px-2.5 text-xs"
+            disabled={!dirty}
+            onClick={onSave}
+          >
+            Save AEAT Columns
+          </button>
+          <button
+            type="button"
+            className="app-btn h-8 px-2.5 text-xs"
+            onClick={onReset}
+          >
+            Reset Default
+          </button>
+        </div>
+      </div>
+
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        These three columns are optional in AEAT and are hidden by default. The on-screen
+        report, Export Excel and Export CSV use the same saved column visibility.
+      </p>
+
+      {flash && (
+        <div
+          className="mt-2 rounded-md border border-success/40 bg-success/10 px-3 py-1.5 text-xs text-success"
+          role="status"
+        >
+          {flash}
+        </div>
+      )}
+
+      <div className="mt-3 grid gap-2 md:grid-cols-3">
+        {AEAT_OPTIONAL_COLUMN_KEYS.map((key) => (
+          <label
+            key={key}
+            className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm"
+          >
+            <input
+              type="checkbox"
+              checked={draft.shownOptionalColumns.includes(key)}
+              onChange={() => toggle(key)}
+            />
+            <span>{AEAT_OPTIONAL_COLUMN_LABELS[key]}</span>
+          </label>
+        ))}
+      </div>
+
+      <div className="mt-2 text-[11px] text-muted-foreground">
+        Default: {DEFAULT_AEAT_COLUMN_SETTINGS.shownOptionalColumns.length === 0 ? "all three hidden" : "custom"}.
+      </div>
+    </section>
+  );
+}
+
 // ----- Report Print Layout -------------------------------------------------
 
 function PrintLayoutCard() {
@@ -406,7 +527,7 @@ function PrintLayoutCard() {
       </div>
 
       <p className="mt-2 text-[11px] text-muted-foreground">
-        Applies to all eight Purchase Reports and Print All. Screen layout is unchanged.
+        Applies to all 10 Purchase Reports and Print All. Screen layout is unchanged.
       </p>
 
       {flash && (
