@@ -117,67 +117,71 @@ function audit(): PurchaseAuditResult {
 describe("Advanced Expenditure Audit Trail", () => {
   it("uses the exact 13 client template columns B:N in the required order", () => {
     expect(AEAT_EXCEL_COLUMNS).toEqual([
-      "Company Code (4)",
-      "G/L Account (10)",
+      "CO. CODE",
+      "GL CODE",
       "Item Text (50)",
       "Debit",
       "Credit",
       "Amount in Company Code Currency",
       "Amount in Second Local Currency",
-      "Tax Code (2)",
+      "TAX CODE",
       "Tax Jurisdiction (15)",
-      "Cost Center (10)",
-      "Profit Center (10)",
-      "Order Number (12)",
-      "WBS Element (24)",
+      "Cost Center",
+      "Profit Center",
+      "ORDER NO.",
+      "WBS ELEMENT",
     ]);
   });
 
-  it("uses shorter screen labels without changing Excel/CSV template labels", () => {
+  it("uses the same shortened labels on screen and in Excel/CSV", () => {
     const columns = getAdvancedExpenditureColumns();
     const byKey = new Map(columns.map((column) => [column.key, aeatScreenLabel(column)]));
     expect(byKey.get("companyCode")).toBe("CO. CODE");
     expect(byKey.get("glAccount")).toBe("GL CODE");
     expect(byKey.get("taxCode")).toBe("TAX CODE");
+    expect(byKey.get("costCenter")).toBe("Cost Center");
+    expect(byKey.get("profitCenter")).toBe("Profit Center");
     expect(byKey.get("orderNumber")).toBe("ORDER NO.");
     expect(byKey.get("wbsElement")).toBe("WBS ELEMENT");
 
-    expect(columns.find((column) => column.key === "companyCode")?.label).toBe("Company Code (4)");
-    expect(columns.find((column) => column.key === "glAccount")?.label).toBe("G/L Account (10)");
-    expect(columns.find((column) => column.key === "taxCode")?.label).toBe("Tax Code (2)");
-    expect(columns.find((column) => column.key === "orderNumber")?.label).toBe("Order Number (12)");
-    expect(columns.find((column) => column.key === "wbsElement")?.label).toBe("WBS Element (24)");
+    expect(columns.find((column) => column.key === "companyCode")?.label).toBe("CO. CODE");
+    expect(columns.find((column) => column.key === "glAccount")?.label).toBe("GL CODE");
+    expect(columns.find((column) => column.key === "taxCode")?.label).toBe("TAX CODE");
+    expect(columns.find((column) => column.key === "costCenter")?.label).toBe("Cost Center");
+    expect(columns.find((column) => column.key === "profitCenter")?.label).toBe("Profit Center");
+    expect(columns.find((column) => column.key === "orderNumber")?.label).toBe("ORDER NO.");
+    expect(columns.find((column) => column.key === "wbsElement")?.label).toBe("WBS ELEMENT");
   });
 
   it("hides the three optional AEAT columns by default and preserves canonical order when enabled", () => {
     const defaults = getAdvancedExpenditureColumns();
     expect(defaults.map((c) => c.label)).toEqual([
-      "Company Code (4)",
-      "G/L Account (10)",
+      "CO. CODE",
+      "GL CODE",
       "Item Text (50)",
       "Debit",
       "Credit",
-      "Tax Code (2)",
-      "Cost Center (10)",
-      "Profit Center (10)",
-      "Order Number (12)",
-      "WBS Element (24)",
+      "TAX CODE",
+      "Cost Center",
+      "Profit Center",
+      "ORDER NO.",
+      "WBS ELEMENT",
     ]);
 
     const shown = getAdvancedExpenditureColumns(["companyCurrencyAmount", "jurisdiction"]);
     expect(shown.map((c) => c.label)).toEqual([
-      "Company Code (4)",
-      "G/L Account (10)",
+      "CO. CODE",
+      "GL CODE",
       "Item Text (50)",
       "Debit",
       "Credit",
       "Amount in Company Code Currency",
-      "Tax Code (2)",
+      "TAX CODE",
       "Tax Jurisdiction (15)",
-      "Cost Center (10)",
-      "Profit Center (10)",
-      "Order Number (12)",
-      "WBS Element (24)",
+      "Cost Center",
+      "Profit Center",
+      "ORDER NO.",
+      "WBS ELEMENT",
     ]);
   });
 
@@ -396,7 +400,7 @@ describe("Advanced Expenditure Audit Trail", () => {
     expect(xml).not.toContain("Amount in Company Code Currency");
     expect(xml).not.toContain("Amount in Second Local Currency");
     expect(csv.split("\r\n")[0]).toBe(
-      "Company Code (4),G/L Account (10),Item Text (50),Debit,Credit,Tax Code (2),Tax Jurisdiction (15),Cost Center (10),Profit Center (10),Order Number (12),WBS Element (24)",
+      "CO. CODE,GL CODE,Item Text (50),Debit,Credit,TAX CODE,Tax Jurisdiction (15),Cost Center,Profit Center,ORDER NO.,WBS ELEMENT",
     );
     expect(csv).toContain('"HQIADS, ""special"""');
   });
@@ -420,7 +424,7 @@ describe("Advanced Expenditure Audit Trail", () => {
     expect(xml).toContain("200007");
     expect(xml).toContain("50000850");
     expect(xml).toContain("C-0000623-01-03");
-    expect(xml).toContain("Company Code (4)");
+    expect(xml).toContain("CO. CODE");
     expect(xml).toContain("Amount in Company Code Currency");
     expect(xml).toContain("Amount in Second Local Currency");
     expect(xml).toContain("Tax Jurisdiction (15)");
