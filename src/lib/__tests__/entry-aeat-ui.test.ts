@@ -67,6 +67,23 @@ describe("New Bill entry clarity refinements", () => {
   });
 });
 
+describe("AEAT screen-fit refinements", () => {
+  it("renames the AEAT period label and fits the result table without a desktop min-width", () => {
+    const src = read("src/routes/reports_.purchase.$view.tsx");
+    expect(src).toContain('periodLabel={viewId === "advanced-expenditure-audit" ? "From > To" : "Period"}');
+    expect(src).toContain('className="aeat-table w-full table-fixed text-left text-[12px]"');
+    expect(src).toContain("aeatScreenLabel(column)");
+    expect(src).toContain('return "w-[12%]"');
+    expect(src).not.toContain('min-w-[1450px]');
+  });
+
+  it("wraps long AEAT values so WBS Element remains readable on screen", () => {
+    const src = read("src/routes/reports_.purchase.$view.tsx");
+    expect(src).toContain("whitespace-normal break-words");
+    expect(src).toContain("title={rendered}");
+  });
+});
+
 describe("AEAT interaction refinements", () => {
   it("defaults Breakdown credit side to ON and exports the current mode", () => {
     const src = read("src/routes/reports_.purchase.$view.tsx");
