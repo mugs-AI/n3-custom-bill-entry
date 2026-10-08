@@ -1,0 +1,24 @@
+name: AEAT lint baseline check
+
+on:
+  push:
+    branches:
+      - verify/aeat-lint-baseline
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Lint
+        run: bun run lint
+      - name: Production build
+        run: bun run build
