@@ -28,7 +28,7 @@ describe("New Bill entry clarity refinements", () => {
   it("keeps the New Bill header compact and totals on one responsive row", () => {
     const src = read("src/routes/index.tsx");
     expect(src).toContain('<div className="app-card p-2.5">');
-    expect(src).toContain('grid grid-cols-1 gap-2 lg:grid-cols-4');
+    expect(src).toContain("grid grid-cols-1 gap-2 lg:grid-cols-4");
     expect(src).toContain("Sub Total (MYR)");
     expect(src).toContain("Tax (MYR)");
     expect(src).toContain("Grand Total (MYR)");
@@ -38,7 +38,9 @@ describe("New Bill entry clarity refinements", () => {
   it("moves page help into an info popover and secondary supplier details into a right drawer", () => {
     const src = read("src/routes/index.tsx");
     expect(src).toContain("function InfoPopover");
-    expect(src).toContain('label={isEdit ? "About editing this Purchase Invoice" : "About New Bill Entry"}');
+    expect(src).toContain(
+      'label={isEdit ? "About editing this Purchase Invoice" : "About New Bill Entry"}',
+    );
     expect(src).toContain("Supplier details / Term");
     expect(src).toContain('aria-label="Supplier details and term"');
     expect(src).toContain("Secondary supplier information is kept here");
@@ -70,7 +72,9 @@ describe("AEAT interaction refinements", () => {
     const src = read("src/routes/reports_.purchase.$view.tsx");
     expect(src).toContain("const [breakdownCreditSide, setBreakdownCreditSide] = useState(true)");
     expect(src).toContain("Breakdown credit side");
-    expect(src).toContain("buildAdvancedExpenditureAuditRows(report, result, { breakdownCreditSide })");
+    expect(src).toContain(
+      "buildAdvancedExpenditureAuditRows(report, result, { breakdownCreditSide })",
+    );
     expect(src).toContain("buildAdvancedExpenditureExcelXml(rows, visibleColumns)");
   });
 });

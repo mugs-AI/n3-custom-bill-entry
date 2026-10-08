@@ -147,10 +147,7 @@ describe("Advanced Expenditure Audit Trail", () => {
       "WBS Element (24)",
     ]);
 
-    const shown = getAdvancedExpenditureColumns([
-      "companyCurrencyAmount",
-      "jurisdiction",
-    ]);
+    const shown = getAdvancedExpenditureColumns(["companyCurrencyAmount", "jurisdiction"]);
     expect(shown.map((c) => c.label)).toEqual([
       "Company Code (4)",
       "G/L Account (10)",
@@ -170,8 +167,20 @@ describe("Advanced Expenditure Audit Trail", () => {
   it("keeps the same GL separate when Cost Centre differs, including A-NIL", () => {
     const rows = buildAdvancedExpenditureAuditRows(
       report([
-        line({ invoiceId: "i1", glAccountCode: "210104", itemDescription: "Non-Cash", projectCode: "50000850", beforeTax: 10 }),
-        line({ invoiceId: "i2", glAccountCode: "210104", itemDescription: "Non-Cash", projectCode: "A-NIL", beforeTax: 20 }),
+        line({
+          invoiceId: "i1",
+          glAccountCode: "210104",
+          itemDescription: "Non-Cash",
+          projectCode: "50000850",
+          beforeTax: 10,
+        }),
+        line({
+          invoiceId: "i2",
+          glAccountCode: "210104",
+          itemDescription: "Non-Cash",
+          projectCode: "A-NIL",
+          beforeTax: 20,
+        }),
       ]),
       null,
     );
@@ -185,8 +194,18 @@ describe("Advanced Expenditure Audit Trail", () => {
   it("keeps the same GL separate when Item Text differs", () => {
     const rows = buildAdvancedExpenditureAuditRows(
       report([
-        line({ invoiceId: "i1", glAccountCode: "211317", itemDescription: "HQIADS-2627-0348", beforeTax: 1000 }),
-        line({ invoiceId: "i2", glAccountCode: "211317", itemDescription: "HQIADS-2627-0355", beforeTax: 600 }),
+        line({
+          invoiceId: "i1",
+          glAccountCode: "211317",
+          itemDescription: "HQIADS-2627-0348",
+          beforeTax: 1000,
+        }),
+        line({
+          invoiceId: "i2",
+          glAccountCode: "211317",
+          itemDescription: "HQIADS-2627-0355",
+          beforeTax: 600,
+        }),
       ]),
       null,
     );
@@ -199,22 +218,47 @@ describe("Advanced Expenditure Audit Trail", () => {
   it("keeps different N3 Stock Codes separate and exports code only as WBS Element", () => {
     const rows = buildAdvancedExpenditureAuditRows(
       report([
-        line({ invoiceId: "i1", glAccountCode: "211900", itemDescription: "HQIADS", stockCode: "C-0000623-01-09", beforeTax: 100 }),
-        line({ invoiceId: "i2", glAccountCode: "211900", itemDescription: "HQIADS", stockCode: "S-0012884-01-01", beforeTax: 200 }),
+        line({
+          invoiceId: "i1",
+          glAccountCode: "211900",
+          itemDescription: "HQIADS",
+          stockCode: "C-0000623-01-09",
+          beforeTax: 100,
+        }),
+        line({
+          invoiceId: "i2",
+          glAccountCode: "211900",
+          itemDescription: "HQIADS",
+          stockCode: "S-0012884-01-01",
+          beforeTax: 200,
+        }),
       ]),
       null,
     );
-    expect(rows.map((r) => r.wbsElement)).toEqual([
-      "C-0000623-01-09",
-      "S-0012884-01-01",
-    ]);
+    expect(rows.map((r) => r.wbsElement)).toEqual(["C-0000623-01-09", "S-0012884-01-01"]);
   });
 
   it("aggregates only identical GL + item + cost centre + WBS + HQ Tax rows", () => {
     const rows = buildAdvancedExpenditureAuditRows(
       report([
-        line({ invoiceId: "i1", glAccountCode: "200007", itemDescription: "Non- Cash Payment IR 4 26-27", projectCode: "50000850", stockCode: "", taxCodeCode: "P5", beforeTax: 500 }),
-        line({ invoiceId: "i2", glAccountCode: "200007", itemDescription: "Non- Cash Payment IR 4 26-27", projectCode: "50000850", stockCode: "", taxCodeCode: "P5", beforeTax: 731.4 }),
+        line({
+          invoiceId: "i1",
+          glAccountCode: "200007",
+          itemDescription: "Non- Cash Payment IR 4 26-27",
+          projectCode: "50000850",
+          stockCode: "",
+          taxCodeCode: "P5",
+          beforeTax: 500,
+        }),
+        line({
+          invoiceId: "i2",
+          glAccountCode: "200007",
+          itemDescription: "Non- Cash Payment IR 4 26-27",
+          projectCode: "50000850",
+          stockCode: "",
+          taxCodeCode: "P5",
+          beforeTax: 731.4,
+        }),
       ]),
       null,
     );
@@ -238,7 +282,13 @@ describe("Advanced Expenditure Audit Trail", () => {
   it("uses the existing reconciled creditor posting for credit rows", () => {
     const rows = buildAdvancedExpenditureAuditRows(
       report([
-        line({ invoiceId: "i1", glAccountCode: "200007", itemDescription: "Expense", taxCodeCode: "P5", beforeTax: 100 }),
+        line({
+          invoiceId: "i1",
+          glAccountCode: "200007",
+          itemDescription: "Expense",
+          taxCodeCode: "P5",
+          beforeTax: 100,
+        }),
       ]),
       audit(),
     );
@@ -263,7 +313,13 @@ describe("Advanced Expenditure Audit Trail", () => {
   it("defaults Breakdown credit side to ON and preserves real creditor codes", () => {
     const rows = buildAdvancedExpenditureAuditRows(
       report([
-        line({ invoiceId: "i1", glAccountCode: "200007", itemDescription: "Expense", taxCodeCode: "P5", beforeTax: 100 }),
+        line({
+          invoiceId: "i1",
+          glAccountCode: "200007",
+          itemDescription: "Expense",
+          taxCodeCode: "P5",
+          beforeTax: 100,
+        }),
       ]),
       audit(),
     );
@@ -275,7 +331,13 @@ describe("Advanced Expenditure Audit Trail", () => {
   it("can consolidate the credit side into one truthful row with blank G/L Account", () => {
     const rows = buildAdvancedExpenditureAuditRows(
       report([
-        line({ invoiceId: "i1", glAccountCode: "200007", itemDescription: "Expense", taxCodeCode: "P5", beforeTax: 100 }),
+        line({
+          invoiceId: "i1",
+          glAccountCode: "200007",
+          itemDescription: "Expense",
+          taxCodeCode: "P5",
+          beforeTax: 100,
+        }),
       ]),
       audit(),
       { breakdownCreditSide: false },
@@ -325,7 +387,14 @@ describe("Advanced Expenditure Audit Trail", () => {
   it("exports the exact 13 AEAT columns to an Excel-compatible workbook", () => {
     const rows = buildAdvancedExpenditureAuditRows(
       report([
-        line({ invoiceId: "i1", glAccountCode: "200007", itemDescription: "HQIADS", projectCode: "50000850", stockCode: "C-0000623-01-03", beforeTax: 100 }),
+        line({
+          invoiceId: "i1",
+          glAccountCode: "200007",
+          itemDescription: "HQIADS",
+          projectCode: "50000850",
+          stockCode: "C-0000623-01-03",
+          beforeTax: 100,
+        }),
       ]),
       null,
     );

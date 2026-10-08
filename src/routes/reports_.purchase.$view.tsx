@@ -55,10 +55,7 @@ import {
   getAdvancedExpenditureColumns,
   type AeatColumnDefinition,
 } from "@/lib/advanced-expenditure-audit";
-import {
-  AEAT_COLUMN_SETTINGS_EVENT,
-  loadAeatColumnSettings,
-} from "@/lib/aeat-column-settings";
+import { AEAT_COLUMN_SETTINGS_EVENT, loadAeatColumnSettings } from "@/lib/aeat-column-settings";
 import {
   buildExpenditureAuditRows,
   buildExpenditurePostingSummary,
@@ -71,7 +68,6 @@ import {
   normalizeAuditFilter,
   type AuditFetchReply,
 } from "@/lib/purchase-report-inquiry";
-
 
 // ----- Route --------------------------------------------------------------
 
@@ -92,8 +88,7 @@ export const VIEW_META: Record<ViewId, { title: string; navLabel: string; blurb:
   "advanced-expenditure-audit": {
     title: "Advanced Expenditure Audit Trail",
     navLabel: "AEAT",
-    blurb:
-      "Advanced posting extract grouped for the client's Excel journal template.",
+    blurb: "Advanced posting extract grouped for the client's Excel journal template.",
   },
   "audit-trail": {
     title: "Purchase Audit Trail",
@@ -182,19 +177,19 @@ function fmt(n: number): string {
   return MYR.format(Number.isFinite(n) ? n : 0);
 }
 
-
 // ----- Component ---------------------------------------------------------
 
 function PurchaseReportPage() {
   const params = useParams({ from: "/reports_/purchase/$view" });
-  const viewId = (VIEW_IDS.includes(params.view as ViewId) ? (params.view as ViewId) : "audit-trail") as ViewId;
+  const viewId = (
+    VIEW_IDS.includes(params.view as ViewId) ? (params.view as ViewId) : "audit-trail"
+  ) as ViewId;
   const meta = VIEW_META[viewId];
   const hydrated = useHydrated();
   const token = useAuthToken();
   const queryClient = useQueryClient();
   const reportRootRef = useRef<HTMLDivElement | null>(null);
   const { print, preparingPrint, styleVars } = usePrintReport(reportRootRef);
-
 
   const inquiry = useMemo(() => (hydrated ? loadInquiry() : null), [hydrated]);
 
@@ -225,10 +220,10 @@ function PurchaseReportPage() {
     queryKey: ["n3", "tariffCodes"],
     enabled: hydrated && !!token,
     queryFn: ({ signal }) =>
-      n3ListAll<{ id: number; code?: string; description?: string }>(
-        "api/TariffCodes/Query",
-        { pageSize: 500, signal },
-      ),
+      n3ListAll<{ id: number; code?: string; description?: string }>("api/TariffCodes/Query", {
+        pageSize: 500,
+        signal,
+      }),
     staleTime: 5 * 60_000,
     retry: (c) => c < 1,
   });
@@ -301,14 +296,16 @@ function PurchaseReportPage() {
     return m;
   }, [cached]);
 
-
   const accountingView = isAccountingView(viewId);
 
   // Correction E §6: a stable audit fingerprint drawn from the current GL
   // Analysis data. Any change in an invoice's identity or accounting amount
   // changes the fingerprint and therefore the cache key.
   const auditFingerprint = useMemo(() => computeAuditFingerprint(cached), [cached]);
-  const authScope = useMemo(() => (hydrated ? getAuthScope() : { tenantId: "", userId: "" }), [hydrated]);
+  const authScope = useMemo(
+    () => (hydrated ? getAuthScope() : { tenantId: "", userId: "" }),
+    [hydrated],
+  );
   const normalizedFilter = useMemo(
     () => (inquiry ? normalizeAuditFilter(inquiry.filter) : null),
     [inquiry],
@@ -329,7 +326,6 @@ function PurchaseReportPage() {
     retry: false,
   });
 
-
   const auditResult: PurchaseAuditResult | null = useMemo(() => {
     const data = auditQ.data;
     if (!data?.ok || !data.gl) return null;
@@ -343,9 +339,7 @@ function PurchaseReportPage() {
         {/* Expenditure Audit renders its legacy-style report header inside the view. */}
         {viewId !== "expenditure-audit" && (
           <div className="print-keep-with-next">
-            <h1 className="report-title text-xl font-semibold tracking-tight">
-              {meta.title}
-            </h1>
+            <h1 className="report-title text-xl font-semibold tracking-tight">{meta.title}</h1>
             <p className="report-subtitle text-sm text-muted-foreground">{meta.blurb}</p>
           </div>
         )}
@@ -371,7 +365,6 @@ function PurchaseReportPage() {
           )}
         </div>
 
-
         <ReportNav current={viewId} />
 
         {!hydrated || !token ? (
@@ -381,8 +374,8 @@ function PurchaseReportPage() {
         ) : !inquiry || !inquiry.ran || !cached ? (
           <div className="app-card p-6 text-sm">
             <p className="text-muted-foreground">
-              No GL Analysis inquiry is currently loaded. Run an inquiry first, then return
-              to this report.
+              No GL Analysis inquiry is currently loaded. Run an inquiry first, then return to this
+              report.
             </p>
             <div className="mt-3">
               <Link to="/reports" className="app-btn app-btn-primary">
@@ -396,7 +389,9 @@ function PurchaseReportPage() {
               <CompactReportHeader
                 filter={inquiry.filter}
                 report={cached}
-                audit={accountingView ? { data: auditQ.data ?? null, result: auditResult } : undefined}
+                audit={
+                  accountingView ? { data: auditQ.data ?? null, result: auditResult } : undefined
+                }
               />
             )}
             {viewId === "expenditure-audit" && (
@@ -488,8 +483,7 @@ export function CompactReportHeader({
 }) {
   const auditData = audit?.data;
   const auditResult = audit?.result;
-  const targetPIs =
-    auditData?.meta?.targetInvoiceCount ?? auditData?.meta?.piDocumentCount ?? 0;
+  const targetPIs = auditData?.meta?.targetInvoiceCount ?? auditData?.meta?.piDocumentCount ?? 0;
   return (
     <div className="app-card compact-report-header px-3 py-2 text-[12px] print-keep-with-next">
       <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -546,15 +540,7 @@ export function CompactReportHeader({
 }
 
 /** Inline label + value on one line (Correction G). */
-function Metric({
-  label,
-  value,
-  tabular,
-}: {
-  label: string;
-  value: string;
-  tabular?: boolean;
-}) {
+function Metric({ label, value, tabular }: { label: string; value: string; tabular?: boolean }) {
   return (
     <div className="crh-metric flex items-baseline gap-1.5">
       <span className="crh-label shrink-0 text-[10px] font-semibold uppercase text-muted-foreground">
@@ -564,7 +550,6 @@ function Metric({
     </div>
   );
 }
-
 
 function formatMalaysiaDateTime(now = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -630,8 +615,10 @@ export function ExpenditureAuditView({
           <div>
             <div className="font-medium">Order By Date</div>
             <div className="mt-3 grid grid-cols-[auto_1fr] gap-x-2">
-              <span>Date From</span><span>: [ {isoToMy(report.criteria.dateFrom)} ]</span>
-              <span>Date To</span><span>: [ {isoToMy(report.criteria.dateTo)} ]</span>
+              <span>Date From</span>
+              <span>: [ {isoToMy(report.criteria.dateFrom)} ]</span>
+              <span>Date To</span>
+              <span>: [ {isoToMy(report.criteria.dateTo)} ]</span>
             </div>
           </div>
           <div className="text-center">
@@ -646,8 +633,13 @@ export function ExpenditureAuditView({
       </div>
 
       {taxDetected && (
-        <div className="rounded-md border border-warning/50 bg-warning/10 p-3 text-sm font-medium text-warning" role="alert">
-          Taxable Purchase Invoice data was detected. This client-specific Expenditure Audit Trail is configured for zero-tax transactions only. Do not rely on its expenditure/posting summary until a taxable version is separately customised.
+        <div
+          className="rounded-md border border-warning/50 bg-warning/10 p-3 text-sm font-medium text-warning"
+          role="alert"
+        >
+          Taxable Purchase Invoice data was detected. This client-specific Expenditure Audit Trail
+          is configured for zero-tax transactions only. Do not rely on its expenditure/posting
+          summary until a taxable version is separately customised.
         </div>
       )}
 
@@ -709,7 +701,10 @@ export function ExpenditureAuditView({
           </thead>
           <tbody>
             {summary.map((row) => (
-              <tr key={`${row.accountCode}:${row.accountName}`} className="border-t border-border/60">
+              <tr
+                key={`${row.accountCode}:${row.accountName}`}
+                className="border-t border-border/60"
+              >
                 <Td className="font-medium">{row.accountCode}</Td>
                 <Td>{row.accountName}</Td>
                 <Td className="tabular text-right">{row.debit ? fmt(row.debit) : ""}</Td>
@@ -719,7 +714,9 @@ export function ExpenditureAuditView({
           </tbody>
           <tfoot className="bg-surface-2 text-[12px]">
             <tr>
-              <Td colSpan={2} className="text-right font-semibold">Total</Td>
+              <Td colSpan={2} className="text-right font-semibold">
+                Total
+              </Td>
               <Td className="tabular text-right font-semibold">{fmt(totals.debit)}</Td>
               <Td className="tabular text-right font-semibold">{fmt(totals.credit)}</Td>
             </tr>
@@ -836,9 +833,10 @@ export function AdvancedExpenditureAuditView({
         </div>
       </div>
       <div className="mb-2 text-[11px] text-muted-foreground">
-        Company Code is 1000. Profit Center repeats Cost Center. Order Number is intentionally blank.
-        Optional amount / Tax Jurisdiction columns are controlled in Settings and are hidden by default.
-        Excel and CSV follow exactly the columns shown below. Breakdown credit side is ON by default.
+        Company Code is 1000. Profit Center repeats Cost Center. Order Number is intentionally
+        blank. Optional amount / Tax Jurisdiction columns are controlled in Settings and are hidden
+        by default. Excel and CSV follow exactly the columns shown below. Breakdown credit side is
+        ON by default.
       </div>
       <table className="w-full min-w-[1450px] text-left text-sm aeat-table">
         <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
@@ -872,7 +870,9 @@ export function AdvancedExpenditureAuditView({
         </tbody>
         <tfoot className="bg-surface-2 text-[12px]">
           <tr>
-            <Td colSpan={3} className="text-right font-semibold">Total</Td>
+            <Td colSpan={3} className="text-right font-semibold">
+              Total
+            </Td>
             <Td className="tabular text-right font-semibold">{fmt(totals.debit)}</Td>
             <Td className="tabular text-right font-semibold">{fmt(totals.credit)}</Td>
             <Td colSpan={Math.max(visibleColumns.length - 5, 1)} />
@@ -892,13 +892,13 @@ function AeatResultCell({
 }) {
   const value = aeatCellValue(row, column.key);
   const rendered =
-    column.numeric && typeof value === "number"
-      ? value
-        ? fmt(value)
-        : ""
-      : String(value);
+    column.numeric && typeof value === "number" ? (value ? fmt(value) : "") : String(value);
   return (
-    <Td className={column.numeric ? "tabular text-right" : column.key === "glAccount" ? "font-medium" : ""}>
+    <Td
+      className={
+        column.numeric ? "tabular text-right" : column.key === "glAccount" ? "font-medium" : ""
+      }
+    >
       {rendered}
     </Td>
   );
@@ -924,7 +924,7 @@ export function DimensionView({ view, report }: { view: DimensionKey; report: Re
     () => (expandedKey ? linesForRow(report.lines, view, expandedKey) : []),
     [expandedKey, report.lines, view],
   );
-  const drillRow = expandedKey ? rows.find((r) => r.key === expandedKey) ?? null : null;
+  const drillRow = expandedKey ? (rows.find((r) => r.key === expandedKey) ?? null) : null;
 
   return (
     <div className="app-card p-3">
@@ -958,9 +958,7 @@ export function DimensionView({ view, report }: { view: DimensionKey; report: Re
                   key={r.key}
                   row={r}
                   expanded={expandedKey === r.key}
-                  onDrill={() =>
-                    setExpandedKey((cur) => (cur === r.key ? null : r.key))
-                  }
+                  onDrill={() => setExpandedKey((cur) => (cur === r.key ? null : r.key))}
                 />
               ))
             )}
@@ -978,9 +976,7 @@ export function DimensionView({ view, report }: { view: DimensionKey; report: Re
           </tfoot>
         </table>
       </div>
-      <div
-        className={`mt-2 text-[11px] ${reconciles ? "text-success" : "text-destructive"}`}
-      >
+      <div className={`mt-2 text-[11px] ${reconciles ? "text-success" : "text-destructive"}`}>
         {reconciles
           ? "Reconciles with GL Analysis totals."
           : "Does not reconcile with GL Analysis totals — please re-run the inquiry."}
@@ -1013,9 +1009,7 @@ function DimensionRowView({
 }) {
   const isBlank = row.key === BLANK_KEY;
   return (
-    <tr
-      className={`border-t border-border/60 ${expanded ? "bg-primary/5" : ""}`}
-    >
+    <tr className={`border-t border-border/60 ${expanded ? "bg-primary/5" : ""}`}>
       <Td className="font-medium">{isBlank ? "" : row.code}</Td>
       <Td>{isBlank ? BLANK_LABEL : row.description}</Td>
       <Td className="tabular text-right">{row.invoiceCount}</Td>
@@ -1051,9 +1045,7 @@ function DimensionDrillPanel({
             {spec.codeHeader} · {spec.descriptionHeader}
           </div>
           <div className="text-sm font-semibold">
-            {row.key === BLANK_KEY
-              ? BLANK_LABEL
-              : `${row.code || "—"} · ${row.description || ""}`}
+            {row.key === BLANK_KEY ? BLANK_LABEL : `${row.code || "—"} · ${row.description || ""}`}
           </div>
           <div className="text-[11px] text-muted-foreground">
             {row.invoiceCount} invoices · {row.lineCount} lines · Incl {fmt(row.includingTax)}
@@ -1083,22 +1075,18 @@ function DimensionDrillPanel({
             {lines.map((l) => (
               <tr key={`${l.invoiceId}:${l.pos}`} className="border-t border-border/60">
                 <Td>{isoToMy(l.docDate)}</Td>
-                <Td><PILink invoiceId={l.invoiceId} docCode={l.docCode} /></Td>
                 <Td>
-                  <div className="tabular text-[12px] text-muted-foreground">
-                    {l.supplierCode}
-                  </div>
+                  <PILink invoiceId={l.invoiceId} docCode={l.docCode} />
+                </Td>
+                <Td>
+                  <div className="tabular text-[12px] text-muted-foreground">{l.supplierCode}</div>
                   <div>{l.supplierName}</div>
                 </Td>
                 <Td>
-                  <div className="tabular text-[12px] text-muted-foreground">
-                    {l.glAccountCode}
-                  </div>
+                  <div className="tabular text-[12px] text-muted-foreground">{l.glAccountCode}</div>
                   <div>{l.glAccountName}</div>
                 </Td>
-                <Td className="max-w-[280px] truncate">
-                  {l.itemDescription}
-                </Td>
+                <Td className="max-w-[280px] truncate">{l.itemDescription}</Td>
                 <Td className="tabular text-right">{fmt(l.qty)}</Td>
                 <Td className="tabular text-right">{fmt(l.beforeTax)}</Td>
                 <Td className="tabular text-right">{fmt(l.taxAmount)}</Td>
@@ -1192,7 +1180,8 @@ function AuditDocumentCard({ doc, invoiceId }: { doc: AuditDocument; invoiceId: 
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border bg-surface-2 px-3 py-2">
         <div>
           <div className="text-sm font-semibold">
-            <PILink invoiceId={invoiceId} docCode={doc.docCode} /> · {doc.supplierCode || "—"} {doc.supplierName || ""}
+            <PILink invoiceId={invoiceId} docCode={doc.docCode} /> · {doc.supplierCode || "—"}{" "}
+            {doc.supplierName || ""}
           </div>
           <div className="text-[11px] text-muted-foreground">
             {isoToMy(doc.docDate)} · Term {doc.termDescription || "—"}
@@ -1289,10 +1278,10 @@ export function PostingAccountView({
   const notEvaluated = result.balanceStatus === "not-evaluated";
   return (
     <div className="space-y-3">
-      
       {notEvaluated && (
         <div className="app-card border-l-4 border-l-destructive p-3 text-sm">
-          Posting Account Summary was not evaluated: no GL rows matched the current Purchase Invoice set.
+          Posting Account Summary was not evaluated: no GL rows matched the current Purchase Invoice
+          set.
         </div>
       )}
       <div className="app-card overflow-x-auto p-3">
@@ -1349,15 +1338,7 @@ export function PostingAccountView({
 
 // ----- Little widgets -----------------------------------------------------
 
-function TotalBox({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "ok" | "bad";
-}) {
+function TotalBox({ label, value, tone }: { label: string; value: string; tone?: "ok" | "bad" }) {
   return (
     <div className="app-card p-3">
       <div className="text-[10px] font-semibold uppercase text-muted-foreground">{label}</div>
@@ -1393,13 +1374,7 @@ function ErrorCard({
   );
 }
 
-function Th({
-  children,
-  className,
-}: {
-  children?: React.ReactNode;
-  className?: string;
-}) {
+function Th({ children, className }: { children?: React.ReactNode; className?: string }) {
   return <th className={`px-3 py-2 font-semibold ${className ?? ""}`}>{children}</th>;
 }
 
@@ -1425,9 +1400,7 @@ function Td({
 export function PILink({ invoiceId, docCode }: { invoiceId: string; docCode: string }) {
   if (!invoiceId) {
     return (
-      <span title="Edit link unavailable (no N3 invoice id in the current inquiry)">
-        {docCode}
-      </span>
+      <span title="Edit link unavailable (no N3 invoice id in the current inquiry)">{docCode}</span>
     );
   }
   return (
