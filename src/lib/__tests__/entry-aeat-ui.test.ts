@@ -86,6 +86,15 @@ describe("AEAT screen-fit refinements", () => {
   });
 });
 
+describe("App version header", () => {
+  it("shows the current release version in a smaller muted font", () => {
+    const src = read("src/components/AppShell.tsx");
+    expect(src).toContain('const APP_VERSION = "v1.0.2026.10.08"');
+    expect(src).toContain('text-[9px] font-medium text-muted-foreground');
+    expect(src).toContain("{APP_VERSION}");
+  });
+});
+
 describe("AEAT interaction refinements", () => {
   it("defaults Breakdown credit side to ON and exports the current mode", () => {
     const src = read("src/routes/reports_.purchase.$view.tsx");
