@@ -18,6 +18,59 @@ export const AEAT_EXCEL_COLUMNS = [
   "WBS Element (24)",
 ] as const;
 
+export type AeatColumnKey =
+  | "companyCode"
+  | "glAccount"
+  | "itemText"
+  | "debit"
+  | "credit"
+  | "companyCurrencyAmount"
+  | "secondLocalCurrencyAmount"
+  | "taxCode"
+  | "jurisdiction"
+  | "costCenter"
+  | "profitCenter"
+  | "orderNumber"
+  | "wbsElement";
+
+export interface AeatColumnDefinition {
+  key: AeatColumnKey;
+  label: (typeof AEAT_EXCEL_COLUMNS)[number];
+  numeric?: boolean;
+  optional?: boolean;
+}
+
+export const AEAT_COLUMNS: readonly AeatColumnDefinition[] = [
+  { key: "companyCode", label: "Company Code (4)" },
+  { key: "glAccount", label: "G/L Account (10)" },
+  { key: "itemText", label: "Item Text (50)" },
+  { key: "debit", label: "Debit", numeric: true },
+  { key: "credit", label: "Credit", numeric: true },
+  {
+    key: "companyCurrencyAmount",
+    label: "Amount in Company Code Currency",
+    optional: true,
+  },
+  {
+    key: "secondLocalCurrencyAmount",
+    label: "Amount in Second Local Currency",
+    optional: true,
+  },
+  { key: "taxCode", label: "Tax Code (2)" },
+  { key: "jurisdiction", label: "Tax Jurisdiction (15)", optional: true },
+  { key: "costCenter", label: "Cost Center (10)" },
+  { key: "profitCenter", label: "Profit Center (10)" },
+  { key: "orderNumber", label: "Order Number (12)" },
+  { key: "wbsElement", label: "WBS Element (24)" },
+];
+
+export function getAdvancedExpenditureColumns(
+  shownOptionalColumns: readonly string[] = [],
+): AeatColumnDefinition[] {
+  const shown = new Set(shownOptionalColumns);
+  return AEAT_COLUMNS.filter((column) => !column.optional || shown.has(column.key));
+}
+
 export interface AdvancedExpenditureAuditRow {
   companyCode: string;
   glAccount: string;
@@ -200,31 +253,24 @@ function excelCell(value: string | number, type: "String" | "Number"): string {
 }
 
 /**
- * Dependency-free SpreadsheetML workbook. Excel opens this directly and the
- * worksheet contains exactly the 13 client-template AEAT columns, aligned to B:N.
+ * Dependency-free SpreadsheetML workbook. Excel opens this directly. The
+ * exported columns follow the exact currently visible AEAT column arrangement.
  */
 export function buildAdvancedExpenditureExcelXml(
   rows: AdvancedExpenditureAuditRow[],
+  columns: readonly AeatColumnDefinition[] = AEAT_COLUMNS,
 ): string {
-  const header = AEAT_EXCEL_COLUMNS.map((h) => excelCell(h, "String")).join("");
+  const header = columns.map((column) => excelCell(column.label, "String")).join("");
   const body = rows
-    .map((r) => {
-      const values: Array<[string | number, "String" | "Number"]> = [
-        [r.companyCode, "String"],
-        [r.glAccount, "String"],
-        [r.itemText, "String"],
-        [r.debit || "", r.debit ? "Number" : "String"],
-        [r.credit || "", r.credit ? "Number" : "String"],
-        [r.companyCurrencyAmount, "String"],
-        [r.secondLocalCurrencyAmount, "String"],
-        [r.taxCode, "String"],
-        [r.jurisdiction, "String"],
-        [r.costCenter, "String"],
-        [r.profitCenter, "String"],
-        [r.orderNumber, "String"],
-        [r.wbsElement, "String"],
-      ];
-      return `<Row>${values.map(([v, t]) => excelCell(v, t)).join("")}</Row>`;
+    .map((row) => {
+      const cells = columns.map((column) => {
+        const value = aeatCellValue(row, column.key);
+        const type: "String" | "Number" =
+          column.numeric && typeof value === "number" && value !== 0 ? "Number" : "String";
+        const rendered = column.numeric && value === 0 ? "" : value;
+        return excelCell(rendered, type);
+      });
+      return `<Row>${cells.join("")}</Row>`;
     })
     .join("");
 
@@ -241,4 +287,32 @@ export function buildAdvancedExpenditureExcelXml(
   </Table>
  </Worksheet>
 </Workbook>`;
+}
+
+function csvCell(value: string | number): string {
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+export function buildAdvancedExpenditureCsv(
+  rows: AdvancedExpenditureAuditRow[],
+  columns: readonly AeatColumnDefinition[] = AEAT_COLUMNS,
+): string {
+  const header = columns.map((column) => csvCell(column.label)).join(",");
+  const body = rows.map((row) =>
+    columns
+      .map((column) => {
+        const value = aeatCellValue(row, column.key);
+        return csvCell(column.numeric && value === 0 ? "" : value);
+      })
+      .join(","),
+  );
+  return [header, ...body].join("\r\n");
+}
+
+export function aeatCellValue(
+  row: AdvancedExpenditureAuditRow,
+  key: AeatColumnKey,
+): string | number {
+  return row[key];
 }
