@@ -49,6 +49,7 @@ import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
 import {
   advancedExpenditureTotals,
   aeatCellValue,
+  aeatScreenLabel,
   buildAdvancedExpenditureAuditRows,
   buildAdvancedExpenditureCsv,
   buildAdvancedExpenditureExcelXml,
@@ -389,6 +390,7 @@ function PurchaseReportPage() {
               <CompactReportHeader
                 filter={inquiry.filter}
                 report={cached}
+                periodLabel={viewId === "advanced-expenditure-audit" ? "From > To" : "Period"}
                 audit={
                   accountingView ? { data: auditQ.data ?? null, result: auditResult } : undefined
                 }
@@ -476,10 +478,12 @@ export function CompactReportHeader({
   filter,
   report,
   audit,
+  periodLabel = "Period",
 }: {
   filter: ReportCriteria;
   report: ReportData;
   audit?: { data: AuditFetchReply | null; result: PurchaseAuditResult | null };
+  periodLabel?: string;
 }) {
   const auditData = audit?.data;
   const auditResult = audit?.result;
@@ -487,7 +491,10 @@ export function CompactReportHeader({
   return (
     <div className="app-card compact-report-header px-3 py-2 text-[12px] print-keep-with-next">
       <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
-        <Metric label="Period" value={`${isoToMy(filter.dateFrom)} → ${isoToMy(filter.dateTo)}`} />
+        <Metric
+          label={periodLabel}
+          value={`${isoToMy(filter.dateFrom)} → ${isoToMy(filter.dateTo)}`}
+        />
         <Metric
           label="Coverage"
           value={`${report.fetchedInvoiceCount} Purchase Invoice${
@@ -813,7 +820,7 @@ export function AdvancedExpenditureAuditView({
     );
 
   return (
-    <div className="app-card overflow-x-auto p-3">
+    <div className="app-card overflow-x-hidden p-3">
       <div className="no-print mb-3 flex flex-wrap items-center justify-between gap-2">
         <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium">
           <input
@@ -838,12 +845,17 @@ export function AdvancedExpenditureAuditView({
         by default. Excel and CSV follow exactly the columns shown below. Breakdown credit side is
         ON by default.
       </div>
-      <table className="w-full min-w-[1450px] text-left text-sm aeat-table">
+      <table className="aeat-table w-full table-fixed text-left text-[12px]">
         <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
           <tr>
             {visibleColumns.map((column) => (
-              <Th key={column.key} className={column.numeric ? "text-right" : ""}>
-                {column.label}
+              <Th
+                key={column.key}
+                className={`${aeatColumnWidthClass(column.key)} ${
+                  column.numeric ? "text-right" : ""
+                } whitespace-normal break-words px-1.5 py-2 leading-tight`}
+              >
+                {aeatScreenLabel(column)}
               </Th>
             ))}
           </tr>
@@ -895,13 +907,42 @@ function AeatResultCell({
     column.numeric && typeof value === "number" ? (value ? fmt(value) : "") : String(value);
   return (
     <Td
-      className={
-        column.numeric ? "tabular text-right" : column.key === "glAccount" ? "font-medium" : ""
-      }
+      className={`${aeatColumnWidthClass(column.key)} ${
+        column.numeric ? "tabular text-right whitespace-nowrap" : "whitespace-normal break-words"
+      } ${column.key === "glAccount" ? "font-medium" : ""} px-1.5 py-2 leading-tight`}
+      title={rendered}
     >
       {rendered}
     </Td>
   );
+}
+
+function aeatColumnWidthClass(key: AeatColumnDefinition["key"]): string {
+  switch (key) {
+    case "companyCode":
+      return "w-[6%]";
+    case "glAccount":
+      return "w-[8%]";
+    case "itemText":
+      return "w-[19%]";
+    case "debit":
+    case "credit":
+      return "w-[8%]";
+    case "companyCurrencyAmount":
+    case "secondLocalCurrencyAmount":
+      return "w-[8%]";
+    case "taxCode":
+      return "w-[6%]";
+    case "jurisdiction":
+      return "w-[8%]";
+    case "costCenter":
+    case "profitCenter":
+      return "w-[9%]";
+    case "orderNumber":
+      return "w-[7%]";
+    case "wbsElement":
+      return "w-[12%]";
+  }
 }
 
 // ----- Dimension views (3-8) ----------------------------------------------
