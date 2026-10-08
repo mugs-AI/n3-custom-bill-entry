@@ -3,7 +3,9 @@ import {
   AEAT_EXCEL_COLUMNS,
   advancedExpenditureTotals,
   buildAdvancedExpenditureAuditRows,
+  buildAdvancedExpenditureCsv,
   buildAdvancedExpenditureExcelXml,
+  getAdvancedExpenditureColumns,
 } from "../advanced-expenditure-audit";
 import type { PurchaseAuditResult } from "../audit-trail";
 import type { GLDrillDownLine, ReportData } from "../report-model";
@@ -121,6 +123,41 @@ describe("Advanced Expenditure Audit Trail", () => {
       "Credit",
       "Amount in Company Code Currency",
       "Amount in Second Local Currency",
+      "Tax Code (2)",
+      "Tax Jurisdiction (15)",
+      "Cost Center (10)",
+      "Profit Center (10)",
+      "Order Number (12)",
+      "WBS Element (24)",
+    ]);
+  });
+
+  it("hides the three optional AEAT columns by default and preserves canonical order when enabled", () => {
+    const defaults = getAdvancedExpenditureColumns();
+    expect(defaults.map((c) => c.label)).toEqual([
+      "Company Code (4)",
+      "G/L Account (10)",
+      "Item Text (50)",
+      "Debit",
+      "Credit",
+      "Tax Code (2)",
+      "Cost Center (10)",
+      "Profit Center (10)",
+      "Order Number (12)",
+      "WBS Element (24)",
+    ]);
+
+    const shown = getAdvancedExpenditureColumns([
+      "companyCurrencyAmount",
+      "jurisdiction",
+    ]);
+    expect(shown.map((c) => c.label)).toEqual([
+      "Company Code (4)",
+      "G/L Account (10)",
+      "Item Text (50)",
+      "Debit",
+      "Credit",
+      "Amount in Company Code Currency",
       "Tax Code (2)",
       "Tax Jurisdiction (15)",
       "Cost Center (10)",
@@ -256,6 +293,33 @@ describe("Advanced Expenditure Audit Trail", () => {
       orderNumber: "",
       wbsElement: "",
     });
+  });
+
+  it("makes Excel and CSV follow the same visible AEAT columns", () => {
+    const rows = buildAdvancedExpenditureAuditRows(
+      report([
+        line({
+          invoiceId: "i1",
+          glAccountCode: "200007",
+          itemDescription: 'HQIADS, "special"',
+          projectCode: "50000850",
+          stockCode: "C-0000623-01-03",
+          beforeTax: 100,
+        }),
+      ]),
+      null,
+    );
+    const columns = getAdvancedExpenditureColumns(["jurisdiction"]);
+    const xml = buildAdvancedExpenditureExcelXml(rows, columns);
+    const csv = buildAdvancedExpenditureCsv(rows, columns);
+
+    expect(xml).toContain("Tax Jurisdiction (15)");
+    expect(xml).not.toContain("Amount in Company Code Currency");
+    expect(xml).not.toContain("Amount in Second Local Currency");
+    expect(csv.split("\r\n")[0]).toBe(
+      "Company Code (4),G/L Account (10),Item Text (50),Debit,Credit,Tax Code (2),Tax Jurisdiction (15),Cost Center (10),Profit Center (10),Order Number (12),WBS Element (24)",
+    );
+    expect(csv).toContain('"HQIADS, ""special"""');
   });
 
   it("exports the exact 13 AEAT columns to an Excel-compatible workbook", () => {
