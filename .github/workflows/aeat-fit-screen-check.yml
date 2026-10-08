@@ -1,0 +1,29 @@
+name: AEAT fit screen verification
+
+on:
+  push:
+    branches:
+      - verify/aeat-fit-screen-check
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Tests
+        run: bun x vitest run
+      - name: Typecheck
+        run: bun x tsc --noEmit
+      - name: Package lint
+        run: |
+          bun x eslint             src/lib/advanced-expenditure-audit.ts             src/routes/reports_.purchase.$view.tsx             src/lib/__tests__/advanced-expenditure-audit.test.ts             src/lib/__tests__/entry-aeat-ui.test.ts
+      - name: Production build
+        run: bun run build
