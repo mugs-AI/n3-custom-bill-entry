@@ -58,7 +58,7 @@ describe("Correction G — Settings page structure", () => {
   });
 
   it("has no separate Preview card and no duplicate action bar", () => {
-    expect((settings.match(/app-card/g) ?? []).length).toBe(3); // 2 cards + loading state
+    expect((settings.match(/app-card/g) ?? []).length).toBe(4); // 3 cards + loading state
     expect(settings).not.toContain("Cancel Unsaved Changes");
     expect(settings).not.toContain("Reset to Default");
   });
