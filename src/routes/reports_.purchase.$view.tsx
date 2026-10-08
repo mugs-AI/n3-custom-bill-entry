@@ -910,9 +910,8 @@ function AeatResultCell({
       className={`${aeatColumnWidthClass(column.key)} ${
         column.numeric ? "tabular text-right whitespace-nowrap" : "whitespace-normal break-words"
       } ${column.key === "glAccount" ? "font-medium" : ""} px-1.5 py-2 leading-tight`}
-      title={rendered}
     >
-      {rendered}
+      <span title={rendered}>{rendered}</span>
     </Td>
   );
 }
