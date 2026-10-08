@@ -47,11 +47,18 @@ import {
 import { canonicalDocCode } from "@/lib/report-keys";
 import { computeAuditFingerprint } from "@/lib/audit-fingerprint";
 import {
-  AEAT_EXCEL_COLUMNS,
   advancedExpenditureTotals,
+  aeatCellValue,
   buildAdvancedExpenditureAuditRows,
+  buildAdvancedExpenditureCsv,
   buildAdvancedExpenditureExcelXml,
+  getAdvancedExpenditureColumns,
+  type AeatColumnDefinition,
 } from "@/lib/advanced-expenditure-audit";
+import {
+  AEAT_COLUMN_SETTINGS_EVENT,
+  loadAeatColumnSettings,
+} from "@/lib/aeat-column-settings";
 import {
   buildExpenditureAuditRows,
   buildExpenditurePostingSummary,
@@ -741,6 +748,17 @@ export function AdvancedExpenditureAuditView({
   onRetry: () => void;
 }) {
   const [breakdownCreditSide, setBreakdownCreditSide] = useState(true);
+  const [columnSettings, setColumnSettings] = useState(() => loadAeatColumnSettings());
+
+  useEffect(() => {
+    const refresh = () => setColumnSettings(loadAeatColumnSettings());
+    window.addEventListener(AEAT_COLUMN_SETTINGS_EVENT, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(AEAT_COLUMN_SETTINGS_EVENT, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -769,21 +787,33 @@ export function AdvancedExpenditureAuditView({
 
   const rows = buildAdvancedExpenditureAuditRows(report, result, { breakdownCreditSide });
   const totals = advancedExpenditureTotals(rows);
+  const visibleColumns = getAdvancedExpenditureColumns(columnSettings.shownOptionalColumns);
 
-  const exportExcel = () => {
-    const xml = buildAdvancedExpenditureExcelXml(rows);
-    const blob = new Blob([xml], {
-      type: "application/vnd.ms-excel;charset=utf-8",
-    });
+  const download = (content: string, mime: string, extension: string) => {
+    const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `AEAT_${report.criteria.dateFrom}_to_${report.criteria.dateTo}.xls`;
+    a.download = `AEAT_${report.criteria.dateFrom}_to_${report.criteria.dateTo}.${extension}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
   };
+
+  const exportExcel = () =>
+    download(
+      buildAdvancedExpenditureExcelXml(rows, visibleColumns),
+      "application/vnd.ms-excel;charset=utf-8",
+      "xls",
+    );
+
+  const exportCsv = () =>
+    download(
+      "\uFEFF" + buildAdvancedExpenditureCsv(rows, visibleColumns),
+      "text/csv;charset=utf-8",
+      "csv",
+    );
 
   return (
     <div className="app-card overflow-x-auto p-3">
@@ -796,24 +826,26 @@ export function AdvancedExpenditureAuditView({
           />
           Breakdown credit side
         </label>
-        <button type="button" className="app-btn" onClick={exportExcel}>
-          Export Excel
-        </button>
+        <div className="flex items-center gap-2">
+          <button type="button" className="app-btn" onClick={exportExcel}>
+            Export Excel
+          </button>
+          <button type="button" className="app-btn" onClick={exportCsv}>
+            Export CSV
+          </button>
+        </div>
       </div>
       <div className="mb-2 text-[11px] text-muted-foreground">
-        Template alignment: B:N. Company Code is 1000. Company/local currency amount columns,
-        Tax Jurisdiction and Order Number are intentionally blank. Profit Center repeats Cost Center.
-        Breakdown credit side is ON by default.
+        Company Code is 1000. Profit Center repeats Cost Center. Order Number is intentionally blank.
+        Optional amount / Tax Jurisdiction columns are controlled in Settings and are hidden by default.
+        Excel and CSV follow exactly the columns shown below. Breakdown credit side is ON by default.
       </div>
-      <table className="w-full min-w-[1900px] text-left text-sm aeat-table">
+      <table className="w-full min-w-[1450px] text-left text-sm aeat-table">
         <thead className="bg-surface-2 text-[11px] uppercase text-muted-foreground">
           <tr>
-            {AEAT_EXCEL_COLUMNS.map((column) => (
-              <Th
-                key={column}
-                className={column === "Debit" || column === "Credit" ? "text-right" : ""}
-              >
-                {column}
+            {visibleColumns.map((column) => (
+              <Th key={column.key} className={column.numeric ? "text-right" : ""}>
+                {column.label}
               </Th>
             ))}
           </tr>
@@ -821,7 +853,7 @@ export function AdvancedExpenditureAuditView({
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <Td colSpan={AEAT_EXCEL_COLUMNS.length} className="text-center text-muted-foreground">
+              <Td colSpan={visibleColumns.length} className="text-center text-muted-foreground">
                 No AEAT rows.
               </Td>
             </tr>
@@ -831,19 +863,9 @@ export function AdvancedExpenditureAuditView({
                 key={`${row.glAccount}:${row.itemText}:${row.costCenter}:${row.wbsElement}:${row.taxCode}:${index}`}
                 className="border-t border-border/60"
               >
-                <Td>{row.companyCode}</Td>
-                <Td className="font-medium">{row.glAccount}</Td>
-                <Td>{row.itemText}</Td>
-                <Td className="tabular text-right">{row.debit ? fmt(row.debit) : ""}</Td>
-                <Td className="tabular text-right">{row.credit ? fmt(row.credit) : ""}</Td>
-                <Td>{row.companyCurrencyAmount}</Td>
-                <Td>{row.secondLocalCurrencyAmount}</Td>
-                <Td>{row.taxCode}</Td>
-                <Td>{row.jurisdiction}</Td>
-                <Td>{row.costCenter}</Td>
-                <Td>{row.profitCenter}</Td>
-                <Td>{row.orderNumber}</Td>
-                <Td>{row.wbsElement}</Td>
+                {visibleColumns.map((column) => (
+                  <AeatResultCell key={column.key} row={row} column={column} />
+                ))}
               </tr>
             ))
           )}
@@ -853,11 +875,32 @@ export function AdvancedExpenditureAuditView({
             <Td colSpan={3} className="text-right font-semibold">Total</Td>
             <Td className="tabular text-right font-semibold">{fmt(totals.debit)}</Td>
             <Td className="tabular text-right font-semibold">{fmt(totals.credit)}</Td>
-            <Td colSpan={8} />
+            <Td colSpan={Math.max(visibleColumns.length - 5, 1)} />
           </tr>
         </tfoot>
       </table>
     </div>
+  );
+}
+
+function AeatResultCell({
+  row,
+  column,
+}: {
+  row: ReturnType<typeof buildAdvancedExpenditureAuditRows>[number];
+  column: AeatColumnDefinition;
+}) {
+  const value = aeatCellValue(row, column.key);
+  const rendered =
+    column.numeric && typeof value === "number"
+      ? value
+        ? fmt(value)
+        : ""
+      : String(value);
+  return (
+    <Td className={column.numeric ? "tabular text-right" : column.key === "glAccount" ? "font-medium" : ""}>
+      {rendered}
+    </Td>
   );
 }
 
