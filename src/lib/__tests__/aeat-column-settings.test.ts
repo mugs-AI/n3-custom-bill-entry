@@ -88,11 +88,15 @@ describe("AEAT optional column settings", () => {
       resolve(process.cwd(), "src/routes/reports_.purchase.$view.tsx"),
       "utf8",
     );
+    const columnSettings = readFileSync(
+      resolve(process.cwd(), "src/lib/aeat-column-settings.ts"),
+      "utf8",
+    );
 
     expect(settings).toContain("Advanced Expenditure Audit Trail Columns");
-    expect(settings).toContain("Amount in Company Code");
-    expect(settings).toContain("Amount in Second Local");
-    expect(settings).toContain("Tax Jurisdiction");
+    expect(columnSettings).toContain("Amount in Company Code");
+    expect(columnSettings).toContain("Amount in Second Local");
+    expect(columnSettings).toContain("Tax Jurisdiction");
     expect(settings).toContain("hidden by default");
 
     expect(report).toContain("Export Excel");
