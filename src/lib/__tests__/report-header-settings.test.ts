@@ -12,9 +12,14 @@ const settings = read("src/routes/settings.tsx");
 
 describe("Correction G — one compact report header", () => {
   it("renders every common metric through the inline Metric component", () => {
-    for (const label of ["Period", "Coverage", "GL Analysis Totals (MYR)"]) {
+    for (const label of ["Coverage", "GL Analysis Totals (MYR)"]) {
       expect(view).toContain(`label="${label}"`);
     }
+    expect(view).toContain('periodLabel = "Period"');
+    expect(view).toContain("label={periodLabel}");
+    expect(view).toContain(
+      'periodLabel={viewId === "advanced-expenditure-audit" ? "From > To" : "Period"}',
+    );
   });
 
   it("renders the four audit metrics in the same card", () => {
