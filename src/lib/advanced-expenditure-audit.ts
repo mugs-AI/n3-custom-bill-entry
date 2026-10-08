@@ -158,24 +158,22 @@ function detailedCreditRows(
     const glAccount = (doc.creditor.accountCode || doc.supplierCode).trim();
     const itemText = (doc.creditor.accountName || doc.supplierName).trim();
     const key = rowKey([glAccount, itemText]);
-    const existing =
-      map.get(key) ??
-      {
-        companyCode: "1000",
-        glAccount,
-        itemText,
-        debit: 0,
-        credit: 0,
-        companyCurrencyAmount: "",
-        secondLocalCurrencyAmount: "",
-        taxCode: "",
-        jurisdiction: "",
-        costCenter: "",
-        profitCenter: "",
-        orderNumber: "",
-        wbsElement: "",
-        taxCodes: new Set<string>(),
-      };
+    const existing = map.get(key) ?? {
+      companyCode: "1000",
+      glAccount,
+      itemText,
+      debit: 0,
+      credit: 0,
+      companyCurrencyAmount: "",
+      secondLocalCurrencyAmount: "",
+      taxCode: "",
+      jurisdiction: "",
+      costCenter: "",
+      profitCenter: "",
+      orderNumber: "",
+      wbsElement: "",
+      taxCodes: new Set<string>(),
+    };
 
     existing.debit = round2(existing.debit + doc.creditor.debit);
     existing.credit = round2(existing.credit + doc.creditor.credit);
